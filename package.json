@@ -33,6 +33,7 @@
   "license": "MIT",
   "dependencies": {
     "@types/form-data": "^2.2.1",
+    "@vercel/kv": "^1.0.1",
     "axios": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
@@ -40,9 +41,6 @@
     "form-data": "^4.0.4",
     "typescript": "^5.3.3",
     "zod": "^3.22.4"
-  },
-  "optionalDependencies": {
-    "@vercel/kv": "^1.0.1"
   },
   "devDependencies": {
     "@types/axios": "^0.9.36",

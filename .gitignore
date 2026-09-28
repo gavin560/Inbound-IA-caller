@@ -8,6 +8,7 @@ yarn-error.log*
 .env
 .env.local
 .env.*.local
+.env.backup
 
 # ngrok configuration (contains auth token)
 ngrok.yml
@@ -39,4 +40,3 @@ docker-compose.override.yml
 tmp/
 temp/
 *.tmp
-

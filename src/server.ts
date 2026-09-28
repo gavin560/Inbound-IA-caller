@@ -43,8 +43,23 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Operational dashboards and diagnostics can reveal integration state. Keep
+// them available to operators, but never expose them on the public internet.
+function requireDiagnosticsAccess(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  const expectedToken = process.env.WEBHOOK_TOKEN;
+  const authorization = req.get('authorization');
+  const suppliedToken = authorization?.replace(/^Bearer\s+/i, '');
+
+  if (!expectedToken || suppliedToken !== expectedToken) {
+    res.status(404).end();
+    return;
+  }
+
+  next();
+}
+
 // Dashboard - Main status page
-app.get('/', async (_req, res) => {
+app.get('/', requireDiagnosticsAccess, async (_req, res) => {
   // Gather all status information
   const uptime = process.uptime();
   const uptimeFormatted = `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m ${Math.floor(uptime % 60)}s`;
@@ -729,23 +744,8 @@ app.get('/health', (_req, res) => {
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     version: process.env.npm_package_version || '1.0.0',
-    environment: process.env.NODE_ENV || 'development',
-    checks: {
-      webhookToken: !!process.env.WEBHOOK_TOKEN,
-      defaultWebhook: !!process.env.GHL_INCOMING_WEBHOOK_URL_DEFAULT,
-      bookingWebhook: !!process.env.GHL_INCOMING_WEBHOOK_URL_BOOKING,
-      depositWebhook: !!process.env.GHL_INCOMING_WEBHOOK_URL_DEPOSIT,
-      vapiApiKey: !!process.env.VAPI_API_KEY,
-      vapiApiBaseUrl: !!process.env.VAPI_API_BASE_URL,
-      ghlApiKey: !!process.env.GHL_API_KEY,
-      slackBotToken: !!process.env.SLACK_BOT_TOKEN,
-      slackChannelId: !!process.env.SLACK_CHANNEL_ID,
-    },
+    environment: process.env.VERCEL === '1' ? 'production' : (process.env.NODE_ENV || 'development'),
     features: {
-      metadataPull: true,
-      ghlToolSupport: true,
-      scheduledPolling: true,
-      slackIntegration: !!(process.env.SLACK_BOT_TOKEN && process.env.SLACK_CHANNEL_ID),
       persistentStorage: storageStatus,
     },
   };
@@ -754,7 +754,7 @@ app.get('/health', (_req, res) => {
 });
 
 // Debug endpoint for environment variables
-app.get('/debug/env', (_req, res) => {
+app.get('/debug/env', requireDiagnosticsAccess, (_req, res) => {
   const envInfo = {
     timestamp: new Date().toISOString(),
     environment: {
@@ -767,10 +767,6 @@ app.get('/debug/env', (_req, res) => {
       VAPI_API_BASE_URL: process.env.VAPI_API_BASE_URL || 'Not set (will default to https://api.vapi.ai)',
       GHL_INCOMING_WEBHOOK_URL_DEFAULT: process.env.GHL_INCOMING_WEBHOOK_URL_DEFAULT ? 'Set' : 'Not set',
     },
-    apiKeyPreviews: {
-      ghlApiKey: process.env.GHL_API_KEY ? process.env.GHL_API_KEY.substring(0, 10) + '...' : 'Not set',
-      vapiApiKey: process.env.VAPI_API_KEY ? process.env.VAPI_API_KEY.substring(0, 10) + '...' : 'Not set',
-    },
     serverInfo: {
       uptime: process.uptime(),
       nodeVersion: process.version,
@@ -782,7 +778,7 @@ app.get('/debug/env', (_req, res) => {
 });
 
 // Debug endpoint to test Vapi API connection
-app.get('/debug/vapi-connection', async (_req, res) => {
+app.get('/debug/vapi-connection', requireDiagnosticsAccess, async (_req, res) => {
   try {
     Logger.info('[DEBUG] Testing Vapi API connection');
     
@@ -822,7 +818,7 @@ app.get('/debug/vapi-connection', async (_req, res) => {
 });
 
 // Debug endpoint to test external HTTPS connectivity
-app.get('/debug/network', async (_req, res) => {
+app.get('/debug/network', requireDiagnosticsAccess, async (_req, res) => {
   const results: Record<string, any> = {
     timestamp: new Date().toISOString(),
     tests: {},
