@@ -331,25 +331,25 @@ export class VapiWebhookHandler {
         case 'schedule_appointment':
         case 'schedule_appointment_inbound':
         case 'schedule_ddp_inbound':
-          return await this.handleScheduleAppointment(id, args, ghlMetadata, callId);
+          return await this.handleScheduleAppointment(id, args, ghlMetadata, callId, 'main', customerPhone);
 
         case 'schedule_gabriel':
         case 'schedule_gabriel_inbound':
-          return await this.handleScheduleAppointment(id, args, ghlMetadata, callId, 'gabriel');
+          return await this.handleScheduleAppointment(id, args, ghlMetadata, callId, 'gabriel', customerPhone);
 
         case 'schedule_callback_inbound':
-          return await this.handleScheduleAppointment(id, args, ghlMetadata, callId, 'callback');
+          return await this.handleScheduleAppointment(id, args, ghlMetadata, callId, 'callback', customerPhone);
 
         case 'reschedule_appointment':
         case 'reschedule_appointment_inbound':
         case 'reschedule_ddp_inbound':
-          return await this.handleRescheduleAppointment(id, args, ghlMetadata, callId);
+          return await this.handleRescheduleAppointment(id, args, ghlMetadata, callId, 'main', customerPhone);
 
         case 'reschedule_gabriel_inbound':
-          return await this.handleRescheduleAppointment(id, args, ghlMetadata, callId, 'gabriel');
+          return await this.handleRescheduleAppointment(id, args, ghlMetadata, callId, 'gabriel', customerPhone);
 
         case 'reschedule_callback_inbound':
-          return await this.handleRescheduleAppointment(id, args, ghlMetadata, callId, 'callback');
+          return await this.handleRescheduleAppointment(id, args, ghlMetadata, callId, 'callback', customerPhone);
 
         case 'lookup_caller':
           return await this.handleLookupCaller(id, args, callId, customerPhone);
@@ -378,7 +378,7 @@ export class VapiWebhookHandler {
           return await this.handleDdpMarkTransferredSupport(id, args, callId, assistantId);
 
         case 'send_text_guide':
-          return await this.handleSendTextGuide(id, args, callId, assistantId);
+          return await this.handleSendTextGuide(id, args, callId, assistantId, customerPhone);
 
         case 'send_text_link':
         case 'send_text_link_inbound':
@@ -523,7 +523,7 @@ export class VapiWebhookHandler {
     }
   }
 
-  private async handleScheduleAppointment(id: string, args: any, ghlMetadata?: any, callId?: string, calendarType: 'main' | 'gabriel' | 'callback' | 'backneck' = 'main'): Promise<ToolResult> {
+  private async handleScheduleAppointment(id: string, args: any, ghlMetadata?: any, callId?: string, calendarType: 'main' | 'gabriel' | 'callback' | 'backneck' = 'main', customerPhone?: string | null): Promise<ToolResult> {
     try {
       const validatedArgs = ScheduleAppointmentArgsSchema.parse(args);
       // Mirror the program_tag routing applied in handleCheckCalendarAvailability
@@ -548,7 +548,7 @@ export class VapiWebhookHandler {
         }
       }
 
-      return await this.ghlConnector.scheduleAppointment(id, validatedArgs, ghlMetadata, callId, this.stateStorage, effectiveType);
+      return await this.ghlConnector.scheduleAppointment(id, validatedArgs, ghlMetadata, callId, this.stateStorage, effectiveType, customerPhone);
     } catch (error) {
       if (error instanceof ZodError) {
         Logger.error('Invalid schedule_appointment arguments', { id, errors: error.issues });
@@ -562,13 +562,13 @@ export class VapiWebhookHandler {
     }
   }
 
-  private async handleRescheduleAppointment(id: string, args: any, ghlMetadata?: any, callId?: string, calendarType: 'main' | 'gabriel' | 'callback' | 'backneck' = 'main'): Promise<ToolResult> {
+  private async handleRescheduleAppointment(id: string, args: any, ghlMetadata?: any, callId?: string, calendarType: 'main' | 'gabriel' | 'callback' | 'backneck' = 'main', customerPhone?: string | null): Promise<ToolResult> {
     try {
       const validatedArgs = RescheduleAppointmentArgsSchema.parse(args);
       // Mirror the program_tag routing used by the scheduling flows so we look
       // up and update the appointment on the correct calendar.
       const effectiveType = calendarType === 'main' && validatedArgs.program_tag === 'BACK_NECK' ? 'backneck' : calendarType;
-      return await this.ghlConnector.rescheduleAppointment(id, validatedArgs, ghlMetadata, callId, this.stateStorage, effectiveType);
+      return await this.ghlConnector.rescheduleAppointment(id, validatedArgs, ghlMetadata, callId, this.stateStorage, effectiveType, customerPhone);
     } catch (error) {
       if (error instanceof ZodError) {
         Logger.error('Invalid reschedule_appointment arguments', { id, errors: error.issues });
@@ -1331,7 +1331,7 @@ export class VapiWebhookHandler {
   }
 
   // ── Send text guide (triggers a GHL workflow that texts the guide) ──
-  private async handleSendTextGuide(id: string, args: any, callId?: string, assistantId?: string): Promise<ToolResult> {
+  private async handleSendTextGuide(id: string, args: any, callId?: string, assistantId?: string, customerPhone?: string | null): Promise<ToolResult> {
     try {
       const validatedArgs = SendTextGuideArgsSchema.parse(args);
 
@@ -1339,6 +1339,9 @@ export class VapiWebhookHandler {
       if (!contactId && callId) {
         const metadata = await this.stateStorage.getCallMetadata(callId);
         contactId = metadata?.contactId;
+      }
+      if (!contactId && customerPhone) {
+        contactId = (await this.ghlConnector.lookupContactByPhone(customerPhone))?.contactId;
       }
 
       if (!contactId) {

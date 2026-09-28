@@ -15,6 +15,9 @@ import type { RouteContext } from './services/callRouter.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
+// Used only by operational endpoints below. Each incoming Vapi webhook gets a
+// dedicated handler so its client-specific GHL connector cannot be switched by
+// another call while an appointment or SMS request is still in flight.
 const vapiHandler = new VapiWebhookHandler();
 
 // Middleware for request logging
@@ -874,10 +877,12 @@ app.get('/debug/network', requireDiagnosticsAccess, async (_req, res) => {
 });
 
 // Vapi webhook endpoint with token validation
-app.post('/vapi/webhook', 
-  (req, res, next) => vapiHandler.validateToken(req, res, next),
-  (req, res) => vapiHandler.handleWebhook(req, res)
-);
+app.post('/vapi/webhook', (req, res) => {
+  const requestHandler = new VapiWebhookHandler();
+  requestHandler.validateToken(req, res, () => {
+    void requestHandler.handleWebhook(req, res);
+  });
+});
 
 // Manual metadata pull endpoint (optional)
 app.post('/vapi/pull-metadata',
