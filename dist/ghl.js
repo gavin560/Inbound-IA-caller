@@ -742,7 +742,7 @@ export class GHLConnector {
             };
         }
     }
-    async scheduleAppointment(id, args, ghlMetadata, _callId, _stateStorage, calendarType = 'main') {
+    async scheduleAppointment(id, args, ghlMetadata, _callId, _stateStorage, calendarType = 'main', customerPhone) {
         try {
             Logger.info('[CALENDAR] Processing schedule_appointment', {
                 id,
@@ -794,8 +794,12 @@ export class GHLConnector {
                     });
                 }
             }
-            // If not in config, try to get from calendar info
-            if (!locationId) {
+            // Read the calendar even when the location is configured: its timezone is
+            // the source of truth for appointment creation. Using a single hard-coded
+            // Eastern timezone makes callers for practices in other regions book at
+            // the wrong time.
+            let calendarTimezone = 'America/New_York';
+            {
                 try {
                     const calendarResponse = await this.httpClient.get(`https://services.leadconnectorhq.com/calendars/${calendarId}`, {
                         headers: {
@@ -810,7 +814,11 @@ export class GHLConnector {
                         // Option 2: { locationId: "..." }
                         // Option 3: { location: { id: "..." } }
                         const calendarData = calendarResponse.data?.calendar || calendarResponse.data;
-                        locationId = calendarData?.locationId || calendarResponse.data?.locationId || calendarData?.location?.id || calendarResponse.data?.location?.id;
+                        locationId = locationId || calendarData?.locationId || calendarResponse.data?.locationId || calendarData?.location?.id || calendarResponse.data?.location?.id;
+                        const configuredTimezone = calendarData?.timezone || calendarData?.timeZone || calendarData?.schedule?.timezone || calendarResponse.data?.timezone || calendarResponse.data?.timeZone;
+                        if (typeof configuredTimezone === 'string' && /^[A-Za-z_]+\/[A-Za-z_]+$/.test(configuredTimezone)) {
+                            calendarTimezone = configuredTimezone;
+                        }
                         Logger.info('[CALENDAR] Retrieved locationId from calendar', {
                             id,
                             calendarId,
@@ -898,6 +906,16 @@ export class GHLConnector {
                     firstName: contactFirstName,
                     lastName: contactLastName,
                     phone: contactPhone ? '***' + contactPhone.slice(-4) : 'missing',
+                });
+            }
+            // Final fallback for direct inbound Vapi calls. The caller's real number
+            // is more reliable than an LLM-supplied argument and is available in the
+            // webhook payload even when there is no GHL metadata.
+            if (!contactPhone && customerPhone) {
+                contactPhone = customerPhone;
+                Logger.info('[CALENDAR] Using caller phone from Vapi payload', {
+                    id,
+                    phone: '***' + customerPhone.slice(-4),
                 });
             }
             // Parse name from args.name (only if we don't have it from metadata)
@@ -1233,7 +1251,7 @@ export class GHLConnector {
                 calendarId,
                 contactId: contactIdToUse,
                 selectedSlot,
-                selectedTimezone: 'America/New_York', // EST timezone - could be made configurable
+                selectedTimezone: calendarTimezone,
                 notes: args.notes || '',
             };
             Logger.info('[CALENDAR] Using contactId in payload', {
@@ -1288,7 +1306,7 @@ export class GHLConnector {
                     data: {
                         appointmentId: response.data?.id,
                         calendarId,
-                        contactId: args.contactId || undefined,
+                        contactId: contactIdToUse,
                         startTime: startTime.toISOString(),
                         endTime: endTime.toISOString(),
                         message: 'Appointment scheduled successfully',
@@ -1400,7 +1418,7 @@ export class GHLConnector {
      * free-slots → PUT the event in place so the same appointmentId and history
      * are preserved.
      */
-    async rescheduleAppointment(id, args, ghlMetadata, _callId, _stateStorage, calendarType = 'main') {
+    async rescheduleAppointment(id, args, ghlMetadata, _callId, _stateStorage, calendarType = 'main', customerPhone) {
         try {
             Logger.info('[RESCHEDULE] Processing reschedule_appointment', {
                 id,
@@ -1437,7 +1455,7 @@ export class GHLConnector {
             // Priority: explicit arg > webhook metadata > phone search.
             let contactId = args.contactId || ghlMetadata?.contactId || ghlMetadata?.contact?.id;
             if (!contactId) {
-                const rawPhone = args.phone || ghlMetadata?.contact?.phone || ghlMetadata?.contact?.phoneNumber;
+                const rawPhone = args.phone || ghlMetadata?.contact?.phone || ghlMetadata?.contact?.phoneNumber || customerPhone;
                 if (rawPhone) {
                     const found = await this.lookupContactByPhone(rawPhone.replace(/[\s\-\(\)\.]/g, '').trim());
                     if (found) {

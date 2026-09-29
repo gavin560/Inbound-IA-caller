@@ -36,7 +36,7 @@ export declare class GHLConnector {
     updateStage(id: string, args: UpdateStageArgs): Promise<ToolResult>;
     addNoteByContactIdViaAPI(id: string, contactId: string, note: string): Promise<ToolResult>;
     checkCalendarAvailability(id: string, args: CheckCalendarAvailabilityArgs, _callId?: string, _stateStorage?: any, calendarType?: 'main' | 'gabriel' | 'callback' | 'backneck'): Promise<ToolResult>;
-    scheduleAppointment(id: string, args: ScheduleAppointmentArgs, ghlMetadata?: any, _callId?: string, _stateStorage?: any, calendarType?: 'main' | 'gabriel' | 'callback' | 'backneck'): Promise<ToolResult>;
+    scheduleAppointment(id: string, args: ScheduleAppointmentArgs, ghlMetadata?: any, _callId?: string, _stateStorage?: any, calendarType?: 'main' | 'gabriel' | 'callback' | 'backneck', customerPhone?: string | null): Promise<ToolResult>;
     /**
      * Reconcile an AI-provided ISO start time against GHL's canonical free slots.
      *
@@ -56,5 +56,5 @@ export declare class GHLConnector {
      * free-slots → PUT the event in place so the same appointmentId and history
      * are preserved.
      */
-    rescheduleAppointment(id: string, args: RescheduleAppointmentArgs, ghlMetadata?: any, _callId?: string, _stateStorage?: any, calendarType?: 'main' | 'gabriel' | 'callback' | 'backneck'): Promise<ToolResult>;
+    rescheduleAppointment(id: string, args: RescheduleAppointmentArgs, ghlMetadata?: any, _callId?: string, _stateStorage?: any, calendarType?: 'main' | 'gabriel' | 'callback' | 'backneck', customerPhone?: string | null): Promise<ToolResult>;
 }

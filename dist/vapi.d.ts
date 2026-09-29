@@ -1,10 +1,16 @@
 import { Request, Response } from 'express';
 export declare class VapiWebhookHandler {
-    private ghlConnector;
     private vapiApiClient;
     private slackService;
     private stateStorage;
     constructor();
+    /**
+     * GHLConnector keeps the selected assistant internally.  Never share one
+     * between requests: Vercel can process webhooks concurrently, and a second
+     * call could otherwise change the selected clinic while the first is still
+     * waiting for GHL.  Each request gets an isolated connector instead.
+     */
+    private createGhlConnector;
     validateToken(req: Request, res: Response, next: () => void): void;
     handleWebhook(req: Request, res: Response): Promise<void>;
     private processMessage;

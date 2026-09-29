@@ -12,13 +12,16 @@ import { hotProspectorSearchByPhone } from './lib/hotProspector.js';
 const CALLER_STATUS_BASE = process.env.CALLER_STATUS_BASE_URL || 'https://ai-call-xi.vercel.app';
 // Generous enough to survive a cold start on ai-call-xi, well under Vapi's tool timeout.
 const CALLER_STATUS_TIMEOUT_MS = 8000;
+// Keep the warm-transfer introduction accurate even while an assistant ID is
+// being migrated before its production environment variable is updated.
+const PRACTICE_NAME_BY_ASSISTANT_ID = {
+    'edb4656b-e64d-4f20-837d-8197962abcee': 'NuViVe Medical Center',
+};
 export class VapiWebhookHandler {
-    ghlConnector;
     vapiApiClient;
     slackService;
     stateStorage; // ✅ Persistent storage for Vercel
     constructor() {
-        this.ghlConnector = new GHLConnector();
         this.vapiApiClient = new VapiApiClient();
         this.stateStorage = new StateStorage(); // ✅ Initialize StateStorage
         // Initialize Slack service if credentials are available
@@ -32,6 +35,19 @@ export class VapiWebhookHandler {
                 error: error instanceof Error ? error.message : 'Unknown error',
             });
         }
+    }
+    /**
+     * GHLConnector keeps the selected assistant internally.  Never share one
+     * between requests: Vercel can process webhooks concurrently, and a second
+     * call could otherwise change the selected clinic while the first is still
+     * waiting for GHL.  Each request gets an isolated connector instead.
+     */
+    createGhlConnector(assistantId) {
+        const connector = new GHLConnector();
+        if (assistantId) {
+            connector.setAssistantId(assistantId);
+        }
+        return connector;
     }
     // Token validation middleware
     validateToken(req, res, next) {
@@ -189,14 +205,11 @@ export class VapiWebhookHandler {
             callId,
             hasGhlMetadata: !!ghlMetadata,
         });
-        // Set assistant ID in GHL connector if available
-        if (assistantId) {
-            this.ghlConnector.setAssistantId(assistantId);
-        }
+        const ghlConnector = this.createGhlConnector(assistantId);
         const vapiResults = [];
         // Process tool calls sequentially to avoid overwhelming GHL
         for (const toolCall of toolCallList) {
-            const result = await this.dispatchToolCall(toolCall, ghlMetadata, callId, assistantId, customerPhone);
+            const result = await this.dispatchToolCall(toolCall, ghlConnector, ghlMetadata, callId, assistantId, customerPhone);
             // Convert to Vapi format: toolCallId and result (as string)
             let resultString;
             if (result.ok) {
@@ -222,46 +235,46 @@ export class VapiWebhookHandler {
             results: vapiResults,
         };
     }
-    async dispatchToolCall(toolCall, ghlMetadata, callId, assistantId, customerPhone) {
+    async dispatchToolCall(toolCall, ghlConnector, ghlMetadata, callId, assistantId, customerPhone) {
         const { id, name, arguments: args } = toolCall;
         Logger.info('Dispatching tool call', { id, name, callId, args, hasGhlMetadata: !!ghlMetadata });
         try {
             switch (name) {
                 case 'send_sms':
-                    return await this.handleSendSms(id, args);
+                    return await this.handleSendSms(id, args, ghlConnector);
                 case 'upsert_contact':
-                    return await this.handleUpsertContact(id, args);
+                    return await this.handleUpsertContact(id, args, ghlConnector);
                 case 'add_tag':
-                    return await this.handleAddTag(id, args);
+                    return await this.handleAddTag(id, args, ghlConnector);
                 case 'add_note':
-                    return await this.handleAddNote(id, args);
+                    return await this.handleAddNote(id, args, ghlConnector);
                 case 'update_stage':
-                    return await this.handleUpdateStage(id, args);
+                    return await this.handleUpdateStage(id, args, ghlConnector);
                 case 'check_calendar_availability':
                 case 'check_calendar_availability_inbound':
                 case 'check_ddp_availability_inbound':
-                    return await this.handleCheckCalendarAvailability(id, args, callId);
+                    return await this.handleCheckCalendarAvailability(id, args, ghlConnector, callId);
                 case 'check_gabriel_availability_inbound':
-                    return await this.handleCheckCalendarAvailability(id, args, callId, 'gabriel');
+                    return await this.handleCheckCalendarAvailability(id, args, ghlConnector, callId, 'gabriel');
                 case 'check_callback_availability_inbound':
-                    return await this.handleCheckCalendarAvailability(id, args, callId, 'callback');
+                    return await this.handleCheckCalendarAvailability(id, args, ghlConnector, callId, 'callback');
                 case 'schedule_appointment':
                 case 'schedule_appointment_inbound':
                 case 'schedule_ddp_inbound':
-                    return await this.handleScheduleAppointment(id, args, ghlMetadata, callId);
+                    return await this.handleScheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'main', customerPhone);
                 case 'schedule_gabriel':
                 case 'schedule_gabriel_inbound':
-                    return await this.handleScheduleAppointment(id, args, ghlMetadata, callId, 'gabriel');
+                    return await this.handleScheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'gabriel', customerPhone);
                 case 'schedule_callback_inbound':
-                    return await this.handleScheduleAppointment(id, args, ghlMetadata, callId, 'callback');
+                    return await this.handleScheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'callback', customerPhone);
                 case 'reschedule_appointment':
                 case 'reschedule_appointment_inbound':
                 case 'reschedule_ddp_inbound':
-                    return await this.handleRescheduleAppointment(id, args, ghlMetadata, callId);
+                    return await this.handleRescheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'main', customerPhone);
                 case 'reschedule_gabriel_inbound':
-                    return await this.handleRescheduleAppointment(id, args, ghlMetadata, callId, 'gabriel');
+                    return await this.handleRescheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'gabriel', customerPhone);
                 case 'reschedule_callback_inbound':
-                    return await this.handleRescheduleAppointment(id, args, ghlMetadata, callId, 'callback');
+                    return await this.handleRescheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'callback', customerPhone);
                 case 'lookup_caller':
                     return await this.handleLookupCaller(id, args, callId, customerPhone);
                 case 'search_contact':
@@ -281,10 +294,10 @@ export class VapiWebhookHandler {
                 case 'ddp_mark_transferred_support':
                     return await this.handleDdpMarkTransferredSupport(id, args, callId, assistantId);
                 case 'send_text_guide':
-                    return await this.handleSendTextGuide(id, args, callId, assistantId);
+                    return await this.handleSendTextGuide(id, args, ghlConnector, callId, assistantId, customerPhone);
                 case 'send_text_link':
                 case 'send_text_link_inbound':
-                    return await this.handleSendTextLink(id, args, callId, assistantId, customerPhone);
+                    return await this.handleSendTextLink(id, args, ghlConnector, callId, assistantId, customerPhone);
                 case 'check_agent_availability':
                 case 'check_agent_availability_inbound':
                     return await this.handleCheckAgentAvailability(id, callId);
@@ -307,10 +320,10 @@ export class VapiWebhookHandler {
             };
         }
     }
-    async handleSendSms(id, args) {
+    async handleSendSms(id, args, ghlConnector) {
         try {
             const validatedArgs = SendSmsArgsSchema.parse(args);
-            return await this.ghlConnector.sendSms(id, validatedArgs);
+            return await ghlConnector.sendSms(id, validatedArgs);
         }
         catch (error) {
             if (error instanceof ZodError) {
@@ -324,10 +337,10 @@ export class VapiWebhookHandler {
             throw error;
         }
     }
-    async handleUpsertContact(id, args) {
+    async handleUpsertContact(id, args, ghlConnector) {
         try {
             const validatedArgs = UpsertContactArgsSchema.parse(args);
-            return await this.ghlConnector.upsertContact(id, validatedArgs);
+            return await ghlConnector.upsertContact(id, validatedArgs);
         }
         catch (error) {
             if (error instanceof ZodError) {
@@ -341,10 +354,10 @@ export class VapiWebhookHandler {
             throw error;
         }
     }
-    async handleAddTag(id, args) {
+    async handleAddTag(id, args, ghlConnector) {
         try {
             const validatedArgs = AddTagArgsSchema.parse(args);
-            return await this.ghlConnector.addTag(id, validatedArgs);
+            return await ghlConnector.addTag(id, validatedArgs);
         }
         catch (error) {
             if (error instanceof ZodError) {
@@ -358,10 +371,10 @@ export class VapiWebhookHandler {
             throw error;
         }
     }
-    async handleAddNote(id, args) {
+    async handleAddNote(id, args, ghlConnector) {
         try {
             const validatedArgs = AddNoteArgsSchema.parse(args);
-            return await this.ghlConnector.addNote(id, validatedArgs);
+            return await ghlConnector.addNote(id, validatedArgs);
         }
         catch (error) {
             if (error instanceof ZodError) {
@@ -375,10 +388,10 @@ export class VapiWebhookHandler {
             throw error;
         }
     }
-    async handleUpdateStage(id, args) {
+    async handleUpdateStage(id, args, ghlConnector) {
         try {
             const validatedArgs = UpdateStageArgsSchema.parse(args);
-            return await this.ghlConnector.updateStage(id, validatedArgs);
+            return await ghlConnector.updateStage(id, validatedArgs);
         }
         catch (error) {
             if (error instanceof ZodError) {
@@ -392,14 +405,14 @@ export class VapiWebhookHandler {
             throw error;
         }
     }
-    async handleCheckCalendarAvailability(id, args, callId, calendarType = 'main') {
+    async handleCheckCalendarAvailability(id, args, ghlConnector, callId, calendarType = 'main') {
         try {
             const validatedArgs = CheckCalendarAvailabilityArgsSchema.parse(args);
             // For multi-program frontdesk assistants, program_tag routes the default
             // ("main") calendar to the back-neck calendar. Gabriel/callback flows are
             // unaffected, and single-program clients never send program_tag.
             const effectiveType = calendarType === 'main' && validatedArgs.program_tag === 'BACK_NECK' ? 'backneck' : calendarType;
-            const result = await this.ghlConnector.checkCalendarAvailability(id, validatedArgs, callId, this.stateStorage, effectiveType);
+            const result = await ghlConnector.checkCalendarAvailability(id, validatedArgs, callId, this.stateStorage, effectiveType);
             if (callId && result.ok) {
                 const existing = (await this.stateStorage.getCallMetadata(callId)) || {};
                 await this.stateStorage.storeCallMetadata(callId, {
@@ -421,7 +434,7 @@ export class VapiWebhookHandler {
             throw error;
         }
     }
-    async handleScheduleAppointment(id, args, ghlMetadata, callId, calendarType = 'main') {
+    async handleScheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, calendarType = 'main', customerPhone) {
         try {
             const validatedArgs = ScheduleAppointmentArgsSchema.parse(args);
             // Mirror the program_tag routing applied in handleCheckCalendarAvailability
@@ -443,7 +456,7 @@ export class VapiWebhookHandler {
                     };
                 }
             }
-            return await this.ghlConnector.scheduleAppointment(id, validatedArgs, ghlMetadata, callId, this.stateStorage, effectiveType);
+            return await ghlConnector.scheduleAppointment(id, validatedArgs, ghlMetadata, callId, this.stateStorage, effectiveType, customerPhone);
         }
         catch (error) {
             if (error instanceof ZodError) {
@@ -457,13 +470,13 @@ export class VapiWebhookHandler {
             throw error;
         }
     }
-    async handleRescheduleAppointment(id, args, ghlMetadata, callId, calendarType = 'main') {
+    async handleRescheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, calendarType = 'main', customerPhone) {
         try {
             const validatedArgs = RescheduleAppointmentArgsSchema.parse(args);
             // Mirror the program_tag routing used by the scheduling flows so we look
             // up and update the appointment on the correct calendar.
             const effectiveType = calendarType === 'main' && validatedArgs.program_tag === 'BACK_NECK' ? 'backneck' : calendarType;
-            return await this.ghlConnector.rescheduleAppointment(id, validatedArgs, ghlMetadata, callId, this.stateStorage, effectiveType);
+            return await ghlConnector.rescheduleAppointment(id, validatedArgs, ghlMetadata, callId, this.stateStorage, effectiveType, customerPhone);
         }
         catch (error) {
             if (error instanceof ZodError) {
@@ -1131,13 +1144,16 @@ export class VapiWebhookHandler {
         }
     }
     // ── Send text guide (triggers a GHL workflow that texts the guide) ──
-    async handleSendTextGuide(id, args, callId, assistantId) {
+    async handleSendTextGuide(id, args, ghlConnector, callId, assistantId, customerPhone) {
         try {
             const validatedArgs = SendTextGuideArgsSchema.parse(args);
             let contactId = validatedArgs.contactId;
             if (!contactId && callId) {
                 const metadata = await this.stateStorage.getCallMetadata(callId);
                 contactId = metadata?.contactId;
+            }
+            if (!contactId && customerPhone) {
+                contactId = (await ghlConnector.lookupContactByPhone(customerPhone))?.contactId;
             }
             if (!contactId) {
                 Logger.error('[SEND_TEXT_GUIDE] Missing contactId', { callId });
@@ -1193,7 +1209,7 @@ export class VapiWebhookHandler {
      * Self-contained: the URL and lead-in text come from this server's client
      * config, so nothing is fetched from the outbound server.
      */
-    async handleSendTextLink(id, args, callId, assistantId, customerPhone) {
+    async handleSendTextLink(id, args, ghlConnector, callId, assistantId, customerPhone) {
         try {
             const validatedArgs = SendTextLinkArgsSchema.parse(args);
             const apiKey = (assistantId && ClientConfigManager.getGHLApiKey(assistantId)) || process.env.GHL_API_KEY;
@@ -1212,14 +1228,14 @@ export class VapiWebhookHandler {
             // then the number the caller phoned in from.
             let contactId = validatedArgs.contactId;
             if (!contactId && validatedArgs.phone) {
-                contactId = (await this.ghlConnector.lookupContactByPhone(validatedArgs.phone))?.contactId;
+                contactId = (await ghlConnector.lookupContactByPhone(validatedArgs.phone))?.contactId;
             }
             if (!contactId && callId) {
                 const metadata = await this.stateStorage.getCallMetadata(callId);
                 contactId = metadata?.contactId;
             }
             if (!contactId && customerPhone) {
-                contactId = (await this.ghlConnector.lookupContactByPhone(customerPhone))?.contactId;
+                contactId = (await ghlConnector.lookupContactByPhone(customerPhone))?.contactId;
             }
             if (!contactId) {
                 Logger.error('[SEND_TEXT_LINK] Could not resolve contact', { callId, hasPhoneArg: !!validatedArgs.phone });
@@ -1337,7 +1353,9 @@ export class VapiWebhookHandler {
             message?.assistantId ||
             undefined;
         const clientName = assistantId ? ClientConfigManager.getClientName(assistantId) : '';
-        const practiceName = clientName && clientName !== 'Unknown Client' ? clientName : 'the practice';
+        const practiceName = (clientName && clientName !== 'Unknown Client' ? clientName : '') ||
+            (assistantId ? PRACTICE_NAME_BY_ASSISTANT_ID[assistantId] : '') ||
+            'the practice';
         try {
             const { available } = await this.fetchLiveAgents();
             // Only available agents WITH a phone number can actually receive the call
@@ -1367,9 +1385,10 @@ export class VapiWebhookHandler {
                     message: 'One moment please, connecting you now.',
                     transferPlan: {
                         mode: 'warm-transfer-with-message',
-                        // Spoken to the HUMAN AGENT receiving the call (inbound wording).
-                        message: `Heads up — you are receiving a live inbound call for ${practiceName}. ` +
-                            `The caller phoned in and asked to be connected with a team member. ` +
+                        // Spoken to the HUMAN AGENT receiving the call. Keep this neutral so
+                        // it is accurate for both inbound callers and outbound lead calls.
+                        message: `Heads up — you are receiving a live call for ${practiceName}. ` +
+                            `The caller asked to be connected with a team member. ` +
                             `Please greet them warmly and ask how you can help today.`,
                     },
                 },
@@ -1422,14 +1441,7 @@ export class VapiWebhookHandler {
             analysis: message.analysis ? 'Analysis included' : 'Analysis pending',
             hasRecording: !!recordingUrl,
         });
-        // Set assistant ID in GHL connector if available
-        if (assistantId) {
-            this.ghlConnector.setAssistantId(assistantId);
-            Logger.info('[END_OF_CALL] Assistant ID set for GHL operations', {
-                assistantId,
-                callId: message.call?.id,
-            });
-        }
+        const ghlConnector = this.createGhlConnector(assistantId);
         // Store the summary from end-of-call-report if available
         if (message.call?.id && callSummary) {
             await this.stateStorage.storeCallSummary(message.call.id, callSummary);
@@ -1550,7 +1562,7 @@ export class VapiWebhookHandler {
                                 callId: message.call.id,
                                 phone: '***' + callerPhone.slice(-4),
                             });
-                            const contactResult = await this.ghlConnector.lookupContactByPhone(callerPhone);
+                            const contactResult = await ghlConnector.lookupContactByPhone(callerPhone);
                             if (contactResult) {
                                 ghlMetadata = contactResult;
                                 Logger.info('[END_OF_CALL] GHL contact found via phone lookup', {
@@ -1584,7 +1596,7 @@ export class VapiWebhookHandler {
                         if (callSummary) {
                             await this.stateStorage.storeCallSummary(message.call.id, callSummary);
                         }
-                        await this.sendFinalSummaryNote(message.call.id, { contactId, metadata: ghlMetadata });
+                        await this.sendFinalSummaryNote(message.call.id, { contactId, metadata: ghlMetadata, assistantId });
                         Logger.info('[END_OF_CALL] Summary note sent to GHL', { callId: message.call.id, contactId });
                     }
                     catch (error) {
@@ -1707,7 +1719,7 @@ export class VapiWebhookHandler {
         });
         try {
             // Dispatch to appropriate GHL connector method based on tool name
-            const result = await this.dispatchGhlTool(message.tool, message.call?.id);
+            const result = await this.dispatchGhlTool(message.tool, message.call?.id, message.call?.assistantId);
             return {
                 ok: true,
                 message: 'GHL tool executed successfully',
@@ -1732,21 +1744,22 @@ export class VapiWebhookHandler {
             };
         }
     }
-    async dispatchGhlTool(tool, callId) {
+    async dispatchGhlTool(tool, callId, assistantId) {
         const { name, parameters = {}, action } = tool;
         const id = callId || `ghl_tool_${Date.now()}`;
+        const ghlConnector = this.createGhlConnector(assistantId);
         Logger.info('Dispatching GHL tool', { id, name, action, parameters });
         switch (name) {
             case 'send_sms':
-                return await this.handleSendSms(id, parameters);
+                return await this.handleSendSms(id, parameters, ghlConnector);
             case 'upsert_contact':
-                return await this.handleUpsertContact(id, parameters);
+                return await this.handleUpsertContact(id, parameters, ghlConnector);
             case 'add_tag':
-                return await this.handleAddTag(id, parameters);
+                return await this.handleAddTag(id, parameters, ghlConnector);
             case 'add_note':
-                return await this.handleAddNote(id, parameters);
+                return await this.handleAddNote(id, parameters, ghlConnector);
             case 'update_stage':
-                return await this.handleUpdateStage(id, parameters);
+                return await this.handleUpdateStage(id, parameters, ghlConnector);
             // Add more GHL-specific tools here
             case 'create_opportunity':
                 return await this.handleCreateOpportunity(id, parameters);
@@ -1862,14 +1875,7 @@ export class VapiWebhookHandler {
                 contactId: ghlMetadata.contactId,
                 source: ghlMetadata.source,
             });
-            // Set assistant ID in GHL connector if available
-            if (assistantId) {
-                this.ghlConnector.setAssistantId(assistantId);
-                Logger.info('[GHL_METADATA_PROCESS] Assistant ID set for GHL operations', {
-                    assistantId,
-                    callId,
-                });
-            }
+            const ghlConnector = this.createGhlConnector(assistantId);
             // Add your custom GHL metadata processing logic here
             // For example: trigger GHL actions based on metadata
             const results = [];
@@ -1880,7 +1886,7 @@ export class VapiWebhookHandler {
                     contactInfo: ghlMetadata.contact,
                 });
                 try {
-                    const contactResult = await this.ghlConnector.upsertContact(`metadata_${callId}_contact`, ghlMetadata.contact);
+                    const contactResult = await ghlConnector.upsertContact(`metadata_${callId}_contact`, ghlMetadata.contact);
                     results.push({
                         action: 'upsert_contact',
                         result: contactResult,
@@ -1901,7 +1907,7 @@ export class VapiWebhookHandler {
                 });
                 for (const tag of ghlMetadata.tags) {
                     try {
-                        const tagResult = await this.ghlConnector.addTag(`metadata_${callId}_tag_${tag}`, {
+                        const tagResult = await ghlConnector.addTag(`metadata_${callId}_tag_${tag}`, {
                             tag,
                             phone: ghlMetadata.contact?.phone,
                             email: ghlMetadata.contact?.email,
@@ -1934,6 +1940,7 @@ export class VapiWebhookHandler {
                     await this.sendFinalSummaryNote(callId, {
                         contactId: ghlMetadata.contactId,
                         metadata: ghlMetadata,
+                        ...(assistantId && { assistantId }),
                     });
                 }
                 catch (error) {
@@ -2046,7 +2053,7 @@ export class VapiWebhookHandler {
                 storedSummary ? `• ${storedSummary}` : `• There is no summary available from the call analysis`
             ].join('\n');
             // Send the summary note to GHL
-            const ghlResult = await this.ghlConnector.addNoteByContactIdViaAPI(`summary_${callId}`, data.contactId, summaryContent);
+            const ghlResult = await this.createGhlConnector(data.assistantId).addNoteByContactIdViaAPI(`summary_${callId}`, data.contactId, summaryContent);
             if (ghlResult.ok) {
                 Logger.info('[FINAL_SUMMARY] Summary note sent to GHL successfully', {
                     callId,
