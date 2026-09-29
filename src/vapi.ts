@@ -40,6 +40,12 @@ const CALLER_STATUS_BASE = process.env.CALLER_STATUS_BASE_URL || 'https://ai-cal
 // Generous enough to survive a cold start on ai-call-xi, well under Vapi's tool timeout.
 const CALLER_STATUS_TIMEOUT_MS = 8000;
 
+// Keep the warm-transfer introduction accurate even while an assistant ID is
+// being migrated before its production environment variable is updated.
+const PRACTICE_NAME_BY_ASSISTANT_ID: Record<string, string> = {
+  'edb4656b-e64d-4f20-837d-8197962abcee': 'NuViVe Medical Center',
+};
+
 interface LiveAgent {
   id?: string;
   name?: string;
@@ -1571,7 +1577,9 @@ export class VapiWebhookHandler {
 
     const clientName = assistantId ? ClientConfigManager.getClientName(assistantId) : '';
     const practiceName =
-      clientName && clientName !== 'Unknown Client' ? clientName : 'the practice';
+      (clientName && clientName !== 'Unknown Client' ? clientName : '') ||
+      (assistantId ? PRACTICE_NAME_BY_ASSISTANT_ID[assistantId] : '') ||
+      'the practice';
 
     try {
       const { available } = await this.fetchLiveAgents();
