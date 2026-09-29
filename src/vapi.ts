@@ -1607,10 +1607,11 @@ export class VapiWebhookHandler {
           message: 'One moment please, connecting you now.',
           transferPlan: {
             mode: 'warm-transfer-with-message',
-            // Spoken to the HUMAN AGENT receiving the call (inbound wording).
-            message:
-              `Heads up — you are receiving a live inbound call for ${practiceName}. ` +
-              `The caller phoned in and asked to be connected with a team member. ` +
+          // Spoken to the HUMAN AGENT receiving the call. Keep this neutral so
+          // it is accurate for both inbound callers and outbound lead calls.
+          message:
+              `Heads up — you are receiving a live call for ${practiceName}. ` +
+              `The caller asked to be connected with a team member. ` +
               `Please greet them warmly and ask how you can help today.`,
           },
         },
