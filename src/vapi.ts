@@ -303,15 +303,15 @@ export class VapiWebhookHandler {
       // Convert to Vapi format: toolCallId and result (as string)
       let resultString: string;
       if (result.ok) {
-        // Convert data to JSON string if it exists, otherwise use success message
-        if (result.data) {
-          resultString = JSON.stringify(result.data);
-        } else {
-          resultString = 'Success';
-        }
+        // Tool completion only confirms that Vapi reached this webhook. Prefix
+        // successful business actions explicitly so the assistant can tell a
+        // delivered SMS from a transport-level completion.
+        resultString = `TOOL_SUCCESS: ${result.data ? JSON.stringify(result.data) : 'Success'}`;
       } else {
-        // For errors, return error message as string
-        resultString = result.error || 'Unknown error';
+        // Keep the failure equally unambiguous for the caller prompt. This
+        // prevents an assistant from treating Vapi's "Completed successfully"
+        // UI status as confirmation that a text was delivered.
+        resultString = `TOOL_FAILURE: ${result.error || 'Unknown error'}`;
       }
       
       vapiResults.push({

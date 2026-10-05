@@ -442,6 +442,35 @@ export class ClientConfigManager {
       }
     }
 
+    // Miami Valley uses separate Vapi assistants for outbound Neuropathy and
+    // inbound Neuropathy calls. Either one may be the primary configured ID,
+    // so register the other as an alias to ensure both use the same GHL
+    // credentials and the explicit NEUROPATHY / BACK_NECK link routing.
+    const miamiValleyAssistantAliases = [
+      ['MIAMI_VALLEY_OUTBOUND_ASSISTANT_ID', 'Miami Valley Outbound'],
+      ['MIAMI_VALLEY_NEURO_INBOUND_ASSISTANT_ID', 'Miami Valley Neuro Inbound'],
+    ] as const;
+    if (miamiValleyAssistantId) {
+      const miamiValleyConfig = this.configs.get(miamiValleyAssistantId);
+      for (const [envVar, aliasName] of miamiValleyAssistantAliases) {
+        const aliasAssistantId = process.env[envVar];
+        if (!aliasAssistantId || !miamiValleyConfig || this.configs.has(aliasAssistantId)) continue;
+
+        this.configs.set(aliasAssistantId, {
+          ...miamiValleyConfig,
+          name: aliasName,
+          assistantId: aliasAssistantId,
+        });
+        configuredClients.push(`${aliasName} (alias)`);
+        Logger.info(`[CLIENT_CONFIG] Registered alias: ${aliasName} -> Miami Valley`, {
+          aliasAssistantId: aliasAssistantId.substring(0, 8) + '...',
+          parentAssistantId: miamiValleyAssistantId.substring(0, 8) + '...',
+          hasGhlApiKey: !!miamiValleyConfig.ghlApiKey,
+          hasSmsLinkUrls: !!miamiValleyConfig.smsLinkUrls,
+        });
+      }
+    }
+
     // Log initialization summary
     if (this.configs.size === 0) {
       Logger.error('[CLIENT_CONFIG] No client configurations loaded! Check environment variables.', {
