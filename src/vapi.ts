@@ -43,7 +43,7 @@ const CALLER_STATUS_TIMEOUT_MS = 8000;
 /** Miami Valley Spine & Injury Chiropractic's live-transfer window. */
 function isMiamiValleyBusinessHours(now = new Date()): boolean {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
+    timeZone: 'America/Denver',
     weekday: 'short',
     hour: '2-digit',
     hourCycle: 'h23',
@@ -1569,7 +1569,7 @@ export class VapiWebhookHandler {
           availableCount: 0,
           availableAgents: [],
           roster: [],
-          businessHours: 'Miami Valley live transfers are available Monday through Friday, 9:00 AM to 5:00 PM Eastern.',
+          businessHours: 'Miami Valley live transfers are available Monday through Friday, 9:00 AM to 5:00 PM Mountain.',
         },
       };
     }
@@ -1643,7 +1643,7 @@ export class VapiWebhookHandler {
       });
       return {
         error:
-          'Miami Valley live transfers are available Monday through Friday, 9:00 AM to 5:00 PM Eastern. Offer to schedule a callback instead.',
+          'Miami Valley live transfers are available Monday through Friday, 9:00 AM to 5:00 PM Mountain. Offer to schedule a callback instead.',
       };
     }
 
