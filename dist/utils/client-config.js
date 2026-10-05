@@ -264,6 +264,11 @@ export class ClientConfigManager {
                     }
                 }
             }
+            // Miami Valley runs separate Neuropathy and Back & Neck offers. Never
+            // let either caller fall through to a shared DEFAULT payment link.
+            if (clientDef.name === 'Miami Valley') {
+                config.requiredSmsLinkKeys = ['NEUROPATHY', 'BACK_NECK'];
+            }
             // Add optional Slack channel if configured
             const slackChannel = process.env[clientDef.slackChannelVar];
             if (slackChannel) {
@@ -385,6 +390,8 @@ export class ClientConfigManager {
                     miamiValleyBackInboundConfig.smsLinkUrls = miamiValleyConfig.smsLinkUrls;
                 if (miamiValleyConfig.smsLinkMessages)
                     miamiValleyBackInboundConfig.smsLinkMessages = miamiValleyConfig.smsLinkMessages;
+                if (miamiValleyConfig.requiredSmsLinkKeys)
+                    miamiValleyBackInboundConfig.requiredSmsLinkKeys = miamiValleyConfig.requiredSmsLinkKeys;
                 this.configs.set(miamiValleyBackInboundAssistantId, miamiValleyBackInboundConfig);
                 configuredClients.push('Miami Valley Back Inbound (alias)');
                 Logger.info('[CLIENT_CONFIG] Registered alias: Miami Valley Back Inbound -> Miami Valley', {
@@ -452,10 +459,20 @@ export class ClientConfigManager {
         if (!config)
             return {};
         const key = (linkKey || 'DEFAULT').toUpperCase();
+        if (config.requiredSmsLinkKeys?.length && !config.requiredSmsLinkKeys.includes(key)) {
+            return {};
+        }
         return {
             url: config.smsLinkUrls?.[key],
             message: config.smsLinkMessages?.[key],
         };
+    }
+    /**
+     * Return the explicit link variants required for a client, if any. A missing
+     * key must be rejected by the tool handler rather than resolved as DEFAULT.
+     */
+    static getRequiredSmsLinkKeys(assistantId) {
+        return this.getConfigByAssistantId(assistantId)?.requiredSmsLinkKeys;
     }
     /**
      * Get Calendar ID by Assistant ID

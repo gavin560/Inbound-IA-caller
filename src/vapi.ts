@@ -1425,6 +1425,21 @@ export class VapiWebhookHandler {
     try {
       const validatedArgs = SendTextLinkArgsSchema.parse(args);
 
+      const normalizedLinkKey = validatedArgs.linkKey?.trim().toUpperCase();
+      const requiredLinkKeys = assistantId
+        ? ClientConfigManager.getRequiredSmsLinkKeys(assistantId)
+        : undefined;
+      if (requiredLinkKeys?.length) {
+        if (!normalizedLinkKey) {
+          Logger.warn('[SEND_TEXT_LINK] Explicit link key required', { callId, assistantId });
+          return { id, ok: false, error: 'SMS_LINK_KEY_REQUIRED' };
+        }
+        if (!requiredLinkKeys.includes(normalizedLinkKey)) {
+          Logger.warn('[SEND_TEXT_LINK] Invalid link key for client', { callId, assistantId, linkKey: normalizedLinkKey });
+          return { id, ok: false, error: 'SMS_LINK_KEY_INVALID' };
+        }
+      }
+
       const apiKey = (assistantId && ClientConfigManager.getGHLApiKey(assistantId)) || process.env.GHL_API_KEY;
       if (!apiKey) {
         Logger.error('[SEND_TEXT_LINK] Missing credentials', { callId, assistantId });
@@ -1432,7 +1447,7 @@ export class VapiWebhookHandler {
       }
 
       const { url, message } = assistantId
-        ? ClientConfigManager.getSmsLink(assistantId, validatedArgs.linkKey)
+        ? ClientConfigManager.getSmsLink(assistantId, normalizedLinkKey)
         : {};
       if (!url) {
         Logger.error('[SEND_TEXT_LINK] No link URL configured', { callId, assistantId, linkKey: validatedArgs.linkKey });

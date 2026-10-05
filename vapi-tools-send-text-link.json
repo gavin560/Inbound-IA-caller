@@ -3,14 +3,14 @@
     "type": "function",
     "function": {
       "name": "send_text_link_inbound",
-      "description": "Sends an SMS text message with a link to the lead's phone (via GoHighLevel). Use it when the lead agrees to receive a link — e.g. the refundable-deposit payment link, or a registration/booking link. The link URL and lead-in text are fixed per client on the backend; you normally don't pass any arguments (the backend resolves the contact from the call metadata and the caller's number). Only pass 'vip' as linkKey when you specifically want to send the VIP variant. Never read the URL aloud, and never tell the caller a text was sent unless this tool returned success.",
+      "description": "Sends an SMS text message with a program-specific link to the lead's phone (via GoHighLevel). Use it only after the lead agrees. For Miami Valley, linkKey is required: use 'neuropathy' for the Neuropathy $25 reservation-payment link and 'back_neck' only for the Back & Neck link. The backend rejects a missing or invalid Miami Valley linkKey. Never read the URL aloud, and never tell the caller a text was sent unless this tool returned success.",
       "parameters": {
         "type": "object",
         "properties": {
           "linkKey": {
-            "description": "Variante del link a enviar (opcional). Omítelo para enviar el link por defecto del cliente. Usa 'vip' para enviar el link VIP (por ejemplo, a un lead ya registrado al que quieres invitar al upgrade VIP).",
+            "description": "Required for Miami Valley. Use 'neuropathy' for its Neuropathy payment link or 'back_neck' for its Back & Neck link.",
             "type": "string",
-            "enum": ["vip"]
+            "enum": ["neuropathy", "back_neck", "vip"]
           },
           "contactId": {
             "description": "ID del contacto en GHL si está disponible (opcional). Normalmente no es necesario: el backend lo resuelve desde la metadata de la llamada.",

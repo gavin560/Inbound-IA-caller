@@ -15,6 +15,7 @@ export interface ClientConfig {
     slackChannelId?: string;
     smsLinkUrls?: Record<string, string>;
     smsLinkMessages?: Record<string, string>;
+    requiredSmsLinkKeys?: string[];
 }
 /**
  * Client Configuration Manager
@@ -46,6 +47,11 @@ export declare class ClientConfigManager {
         url?: string | undefined;
         message?: string | undefined;
     };
+    /**
+     * Return the explicit link variants required for a client, if any. A missing
+     * key must be rejected by the tool handler rather than resolved as DEFAULT.
+     */
+    static getRequiredSmsLinkKeys(assistantId: string): string[] | undefined;
     /**
      * Get Calendar ID by Assistant ID
      */
