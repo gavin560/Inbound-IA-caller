@@ -448,12 +448,15 @@ export class ClientConfigManager {
     // credentials and the explicit NEUROPATHY / BACK_NECK link routing.
     const miamiValleyAssistantAliases = [
       ['MIAMI_VALLEY_OUTBOUND_ASSISTANT_ID', 'Miami Valley Outbound'],
-      ['MIAMI_VALLEY_NEURO_INBOUND_ASSISTANT_ID', 'Miami Valley Neuro Inbound'],
+      // Keep the active inbound Neuropathy assistant safe even if the optional
+      // environment alias has not been added yet. The environment variable
+      // remains the override for a future assistant replacement.
+      ['MIAMI_VALLEY_NEURO_INBOUND_ASSISTANT_ID', 'Miami Valley Neuro Inbound', '5f0cd544-6e84-461f-a2b6-14d4107fb174'],
     ] as const;
     if (miamiValleyAssistantId) {
       const miamiValleyConfig = this.configs.get(miamiValleyAssistantId);
-      for (const [envVar, aliasName] of miamiValleyAssistantAliases) {
-        const aliasAssistantId = process.env[envVar];
+      for (const [envVar, aliasName, defaultAssistantId] of miamiValleyAssistantAliases) {
+        const aliasAssistantId = process.env[envVar] || defaultAssistantId;
         if (!aliasAssistantId || !miamiValleyConfig || this.configs.has(aliasAssistantId)) continue;
 
         this.configs.set(aliasAssistantId, {
