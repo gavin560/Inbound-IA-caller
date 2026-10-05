@@ -40,6 +40,22 @@ const CALLER_STATUS_BASE = process.env.CALLER_STATUS_BASE_URL || 'https://ai-cal
 // Generous enough to survive a cold start on ai-call-xi, well under Vapi's tool timeout.
 const CALLER_STATUS_TIMEOUT_MS = 8000;
 
+/** Miami Valley Spine & Injury Chiropractic's live-transfer window. */
+function isMiamiValleyBusinessHours(now = new Date()): boolean {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'short',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  const hour = Number(values.hour);
+
+  return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(values.weekday || '')
+    && hour >= 9
+    && hour < 17;
+}
+
 // Keep the warm-transfer introduction accurate even while an assistant ID is
 // being migrated before its production environment variable is updated.
 const PRACTICE_NAME_BY_ASSISTANT_ID: Record<string, string> = {
@@ -401,7 +417,7 @@ export class VapiWebhookHandler {
 
         case 'check_agent_availability':
         case 'check_agent_availability_inbound':
-          return await this.handleCheckAgentAvailability(id, callId);
+          return await this.handleCheckAgentAvailability(id, callId, assistantId);
 
         default:
           Logger.warn('Unknown tool name', { id, name });
@@ -1542,7 +1558,22 @@ export class VapiWebhookHandler {
     }
   }
 
-  private async handleCheckAgentAvailability(id: string, callId?: string): Promise<ToolResult> {
+  private async handleCheckAgentAvailability(id: string, callId?: string, assistantId?: string): Promise<ToolResult> {
+    const clientName = assistantId ? ClientConfigManager.getClientName(assistantId) : '';
+    if (clientName === 'Miami Valley' && !isMiamiValleyBusinessHours()) {
+      return {
+        id,
+        ok: true,
+        data: {
+          anyAvailable: false,
+          availableCount: 0,
+          availableAgents: [],
+          roster: [],
+          businessHours: 'Miami Valley live transfers are available Monday through Friday, 9:00 AM to 5:00 PM Eastern.',
+        },
+      };
+    }
+
     try {
       const { agents, available } = await this.fetchLiveAgents();
 
@@ -1604,6 +1635,17 @@ export class VapiWebhookHandler {
       (clientName && clientName !== 'Unknown Client' ? clientName : '') ||
       (assistantId ? PRACTICE_NAME_BY_ASSISTANT_ID[assistantId] : '') ||
       'the practice';
+
+    if (clientName === 'Miami Valley' && !isMiamiValleyBusinessHours()) {
+      Logger.info('[TRANSFER_DESTINATION] Miami Valley transfer blocked outside business hours', {
+        callId,
+        assistantId,
+      });
+      return {
+        error:
+          'Miami Valley live transfers are available Monday through Friday, 9:00 AM to 5:00 PM Eastern. Offer to schedule a callback instead.',
+      };
+    }
 
     try {
       const { available } = await this.fetchLiveAgents();
