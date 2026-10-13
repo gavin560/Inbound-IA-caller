@@ -5,13 +5,27 @@ import { VapiApiClient } from './utils/vapi-client.js';
 import { SlackService } from './utils/slack-service.js';
 import { StateStorage } from './utils/state-storage.js';
 import { ClientConfigManager } from './utils/client-config.js';
-import { VapiWebhookBodySchema, SendSmsArgsSchema, UpsertContactArgsSchema, AddTagArgsSchema, AddNoteArgsSchema, UpdateStageArgsSchema, CheckCalendarAvailabilityArgsSchema, ScheduleAppointmentArgsSchema, RescheduleAppointmentArgsSchema, LookupCallerArgsSchema, SearchContactArgsSchema, DdpCheckContactArgsSchema, DdpCreateContactArgsSchema, DdpMarkTransferredArgsSchema, DdpMarkTransferredSupportArgsSchema, SendTextGuideArgsSchema, SendTextLinkArgsSchema, CheckContactArgsSchema, CreateContactArgsSchema, } from './schemas.js';
+import { VapiWebhookBodySchema, SendSmsArgsSchema, UpsertContactArgsSchema, AddTagArgsSchema, AddNoteArgsSchema, UpdateStageArgsSchema, CheckCalendarAvailabilityArgsSchema, ScheduleAppointmentArgsSchema, RescheduleAppointmentArgsSchema, LookupCallerArgsSchema, SearchContactArgsSchema, DdpCheckContactArgsSchema, DdpCreateContactArgsSchema, DdpMarkTransferredArgsSchema, DdpMarkTransferredSupportArgsSchema, SendTextGuideArgsSchema, SendTextLinkArgsSchema, CheckReservationPaymentArgsSchema, CheckContactArgsSchema, CreateContactArgsSchema, } from './schemas.js';
 import { hotProspectorSearchByPhone } from './lib/hotProspector.js';
 // Live human-agent presence lives in ai-call-xi. This server only READS it —
 // agents sign in at https://ai-call-xi.vercel.app/caller-status.
 const CALLER_STATUS_BASE = process.env.CALLER_STATUS_BASE_URL || 'https://ai-call-xi.vercel.app';
 // Generous enough to survive a cold start on ai-call-xi, well under Vapi's tool timeout.
 const CALLER_STATUS_TIMEOUT_MS = 8000;
+/** Miami Valley Spine & Injury Chiropractic's live-transfer window. */
+function isMiamiValleyBusinessHours(now = new Date()) {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Denver',
+        weekday: 'short',
+        hour: '2-digit',
+        hourCycle: 'h23',
+    }).formatToParts(now);
+    const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+    const hour = Number(values.hour);
+    return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(values.weekday || '')
+        && hour >= 9
+        && hour < 17;
+}
 // Keep the warm-transfer introduction accurate even while an assistant ID is
 // being migrated before its production environment variable is updated.
 const PRACTICE_NAME_BY_ASSISTANT_ID = {
@@ -213,17 +227,16 @@ export class VapiWebhookHandler {
             // Convert to Vapi format: toolCallId and result (as string)
             let resultString;
             if (result.ok) {
-                // Convert data to JSON string if it exists, otherwise use success message
-                if (result.data) {
-                    resultString = JSON.stringify(result.data);
-                }
-                else {
-                    resultString = 'Success';
-                }
+                // Tool completion only confirms that Vapi reached this webhook. Prefix
+                // successful business actions explicitly so the assistant can tell a
+                // delivered SMS from a transport-level completion.
+                resultString = `TOOL_SUCCESS: ${result.data ? JSON.stringify(result.data) : 'Success'}`;
             }
             else {
-                // For errors, return error message as string
-                resultString = result.error || 'Unknown error';
+                // Keep the failure equally unambiguous for the caller prompt. This
+                // prevents an assistant from treating Vapi's "Completed successfully"
+                // UI status as confirmation that a text was delivered.
+                resultString = `TOOL_FAILURE: ${result.error || 'Unknown error'}`;
             }
             vapiResults.push({
                 toolCallId: result.id,
@@ -261,7 +274,7 @@ export class VapiWebhookHandler {
                 case 'schedule_appointment':
                 case 'schedule_appointment_inbound':
                 case 'schedule_ddp_inbound':
-                    return await this.handleScheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'main', customerPhone);
+                    return await this.handleScheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'main', customerPhone, assistantId);
                 case 'schedule_gabriel':
                 case 'schedule_gabriel_inbound':
                     return await this.handleScheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'gabriel', customerPhone);
@@ -298,9 +311,11 @@ export class VapiWebhookHandler {
                 case 'send_text_link':
                 case 'send_text_link_inbound':
                     return await this.handleSendTextLink(id, args, ghlConnector, callId, assistantId, customerPhone);
+                case 'check_reservation_payment':
+                    return await this.handleCheckReservationPayment(id, args, ghlConnector, callId, assistantId, customerPhone);
                 case 'check_agent_availability':
                 case 'check_agent_availability_inbound':
-                    return await this.handleCheckAgentAvailability(id, callId);
+                    return await this.handleCheckAgentAvailability(id, callId, assistantId);
                 default:
                     Logger.warn('Unknown tool name', { id, name });
                     return {
@@ -434,12 +449,36 @@ export class VapiWebhookHandler {
             throw error;
         }
     }
-    async handleScheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, calendarType = 'main', customerPhone) {
+    async handleScheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, calendarType = 'main', customerPhone, assistantId) {
         try {
             const validatedArgs = ScheduleAppointmentArgsSchema.parse(args);
             // Mirror the program_tag routing applied in handleCheckCalendarAvailability
             // so the mismatch guard and the booking target the same calendar.
             const effectiveType = calendarType === 'main' && validatedArgs.program_tag === 'BACK_NECK' ? 'backneck' : calendarType;
+            // This is the hard payment gate. A prompt can be ignored or contradicted;
+            // this server check cannot. It applies only to assistants configured with
+            // a payment-confirmation tag, and only to real clinic appointments (not
+            // internal callback slots or reschedules).
+            const paymentTag = assistantId ? ClientConfigManager.getReservationPaymentTag(assistantId) : undefined;
+            if (paymentTag && calendarType === 'main') {
+                const contactId = await this.resolveContactId(validatedArgs.contactId, validatedArgs.phone, ghlConnector, callId, customerPhone);
+                if (!contactId) {
+                    return {
+                        id,
+                        ok: false,
+                        error: 'PAYMENT_NOT_CONFIRMED: The reservation payment cannot be verified because the caller contact is unavailable. Do not schedule the appointment.',
+                    };
+                }
+                const paid = await ghlConnector.hasContactTag(contactId, paymentTag);
+                if (!paid) {
+                    Logger.warn('[PAYMENT_GATE] Blocked unpaid appointment', { callId, contactId, assistantId });
+                    return {
+                        id,
+                        ok: false,
+                        error: 'PAYMENT_NOT_CONFIRMED: Do not schedule or hold an appointment. Ask the caller to complete the $25 reservation payment, then call check_reservation_payment before retrying.',
+                    };
+                }
+            }
             if (callId) {
                 const metadata = await this.stateStorage.getCallMetadata(callId);
                 const lastChecked = metadata?.lastCheckedCalendarType;
@@ -468,6 +507,52 @@ export class VapiWebhookHandler {
                 };
             }
             throw error;
+        }
+    }
+    /** Resolve a contact consistently for payment verification and booking. */
+    async resolveContactId(explicitContactId, phone, ghlConnector, callId, customerPhone) {
+        if (explicitContactId)
+            return explicitContactId;
+        if (callId) {
+            const metadata = await this.stateStorage.getCallMetadata(callId);
+            if (metadata?.contactId)
+                return metadata.contactId;
+        }
+        const lookupPhone = customerPhone || phone;
+        if (!lookupPhone)
+            return undefined;
+        return (await ghlConnector.lookupContactByPhone(lookupPhone))?.contactId;
+    }
+    /** Returns a factual payment result the caller can use before scheduling. */
+    async handleCheckReservationPayment(id, args, ghlConnector, callId, assistantId, customerPhone) {
+        try {
+            const validatedArgs = CheckReservationPaymentArgsSchema.parse(args);
+            const paymentTag = assistantId ? ClientConfigManager.getReservationPaymentTag(assistantId) : undefined;
+            if (!paymentTag) {
+                return { id, ok: false, error: 'Payment verification is not configured for this assistant.' };
+            }
+            const contactId = await this.resolveContactId(validatedArgs.contactId, validatedArgs.phone, ghlConnector, callId, customerPhone);
+            if (!contactId) {
+                return { id, ok: false, error: 'Could not resolve the caller contact for payment verification.' };
+            }
+            const paid = await ghlConnector.hasContactTag(contactId, paymentTag);
+            Logger.info('[PAYMENT_GATE] Reservation payment checked', { callId, contactId, assistantId, paid });
+            return {
+                id,
+                ok: true,
+                data: {
+                    paid,
+                    contactId,
+                    message: paid
+                        ? 'Reservation payment is confirmed. You may now check availability and schedule the clinic appointment.'
+                        : 'Reservation payment is not confirmed. Do not check availability or schedule an appointment.',
+                },
+            };
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            Logger.error('[PAYMENT_GATE] Payment verification failed', { callId, assistantId, error: message });
+            return { id, ok: false, error: `Payment verification failed: ${message}` };
         }
     }
     async handleRescheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, calendarType = 'main', customerPhone) {
@@ -1315,7 +1400,21 @@ export class VapiWebhookHandler {
             clearTimeout(timeoutId);
         }
     }
-    async handleCheckAgentAvailability(id, callId) {
+    async handleCheckAgentAvailability(id, callId, assistantId) {
+        const clientName = assistantId ? ClientConfigManager.getClientName(assistantId) : '';
+        if (clientName === 'Miami Valley' && !isMiamiValleyBusinessHours()) {
+            return {
+                id,
+                ok: true,
+                data: {
+                    anyAvailable: false,
+                    availableCount: 0,
+                    availableAgents: [],
+                    roster: [],
+                    businessHours: 'Miami Valley live transfers are available Monday through Friday, 9:00 AM to 5:00 PM Mountain.',
+                },
+            };
+        }
         try {
             const { agents, available } = await this.fetchLiveAgents();
             Logger.info('[AGENT_AVAILABILITY] Presence fetched', {
@@ -1370,6 +1469,15 @@ export class VapiWebhookHandler {
         const practiceName = (clientName && clientName !== 'Unknown Client' ? clientName : '') ||
             (assistantId ? PRACTICE_NAME_BY_ASSISTANT_ID[assistantId] : '') ||
             'the practice';
+        if (clientName === 'Miami Valley' && !isMiamiValleyBusinessHours()) {
+            Logger.info('[TRANSFER_DESTINATION] Miami Valley transfer blocked outside business hours', {
+                callId,
+                assistantId,
+            });
+            return {
+                error: 'Miami Valley live transfers are available Monday through Friday, 9:00 AM to 5:00 PM Mountain. Offer to schedule a callback instead.',
+            };
+        }
         try {
             const { available } = await this.fetchLiveAgents();
             // Only available agents WITH a phone number can actually receive the call

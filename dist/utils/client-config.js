@@ -131,6 +131,7 @@ export class ClientConfigManager {
                 calendarIdCallbackVar: 'AMPLIFY_LIFE_DALLAS_CALLBACK_CALENDAR_ID',
                 locationIdVar: 'AMPLIFY_LIFE_DALLAS_LOCATION_ID',
                 slackChannelVar: 'SLACK_CHANNEL_ID_AMPLIFY_LIFE_DALLAS',
+                reservationPaymentTagVar: 'AMPLIFY_LIFE_DALLAS_RESERVATION_PAYMENT_TAG',
             },
             {
                 name: 'Chiromedix',
@@ -269,6 +270,13 @@ export class ClientConfigManager {
             if (clientDef.name === 'Miami Valley') {
                 config.requiredSmsLinkKeys = ['NEUROPATHY', 'BACK_NECK'];
             }
+            // Amplify Dallas' payment gate is deliberately fail-closed. The default
+            // tag is the one its GHL payment workflow creates; the environment value
+            // permits a future rename without a code deployment.
+            if ('reservationPaymentTagVar' in clientDef && clientDef.reservationPaymentTagVar) {
+                config.reservationPaymentTag =
+                    process.env[clientDef.reservationPaymentTagVar] || 'amplify-dallas-reservation-paid';
+            }
             // Add optional Slack channel if configured
             const slackChannel = process.env[clientDef.slackChannelVar];
             if (slackChannel) {
@@ -404,6 +412,37 @@ export class ClientConfigManager {
                 });
             }
         }
+        // Miami Valley uses separate Vapi assistants for outbound Neuropathy and
+        // inbound Neuropathy calls. Either one may be the primary configured ID,
+        // so register the other as an alias to ensure both use the same GHL
+        // credentials and the explicit NEUROPATHY / BACK_NECK link routing.
+        const miamiValleyAssistantAliases = [
+            ['MIAMI_VALLEY_OUTBOUND_ASSISTANT_ID', 'Miami Valley Outbound'],
+            // Keep the active inbound Neuropathy assistant safe even if the optional
+            // environment alias has not been added yet. The environment variable
+            // remains the override for a future assistant replacement.
+            ['MIAMI_VALLEY_NEURO_INBOUND_ASSISTANT_ID', 'Miami Valley Neuro Inbound', '5f0cd544-6e84-461f-a2b6-14d4107fb174'],
+        ];
+        if (miamiValleyAssistantId) {
+            const miamiValleyConfig = this.configs.get(miamiValleyAssistantId);
+            for (const [envVar, aliasName, defaultAssistantId] of miamiValleyAssistantAliases) {
+                const aliasAssistantId = process.env[envVar] || defaultAssistantId;
+                if (!aliasAssistantId || !miamiValleyConfig || this.configs.has(aliasAssistantId))
+                    continue;
+                this.configs.set(aliasAssistantId, {
+                    ...miamiValleyConfig,
+                    name: aliasName,
+                    assistantId: aliasAssistantId,
+                });
+                configuredClients.push(`${aliasName} (alias)`);
+                Logger.info(`[CLIENT_CONFIG] Registered alias: ${aliasName} -> Miami Valley`, {
+                    aliasAssistantId: aliasAssistantId.substring(0, 8) + '...',
+                    parentAssistantId: miamiValleyAssistantId.substring(0, 8) + '...',
+                    hasGhlApiKey: !!miamiValleyConfig.ghlApiKey,
+                    hasSmsLinkUrls: !!miamiValleyConfig.smsLinkUrls,
+                });
+            }
+        }
         // Log initialization summary
         if (this.configs.size === 0) {
             Logger.error('[CLIENT_CONFIG] No client configurations loaded! Check environment variables.', {
@@ -473,6 +512,13 @@ export class ClientConfigManager {
      */
     static getRequiredSmsLinkKeys(assistantId) {
         return this.getConfigByAssistantId(assistantId)?.requiredSmsLinkKeys;
+    }
+    /**
+     * Return the payment-confirmation tag required before this assistant may
+     * create a clinic appointment.
+     */
+    static getReservationPaymentTag(assistantId) {
+        return this.getConfigByAssistantId(assistantId)?.reservationPaymentTag;
     }
     /**
      * Get Calendar ID by Assistant ID

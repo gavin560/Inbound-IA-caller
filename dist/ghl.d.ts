@@ -23,6 +23,13 @@ export declare class GHLConnector {
         contact: any;
     } | null>;
     /**
+     * Checks whether a contact carries the payment-confirmation tag supplied by
+     * the location's payment workflow. Tags are used rather than an LLM claim
+     * or a sent-SMS receipt, so appointment creation is blocked until GHL has
+     * actually recorded the payment event.
+     */
+    hasContactTag(contactId: string, expectedTag: string): Promise<boolean>;
+    /**
      * Get the Calendar ID based on Assistant ID and optional calendar type.
      * - 'main' (default): primary client calendar
      * - 'gabriel': DDP secondary calendar (collections under $40K)

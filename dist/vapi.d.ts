@@ -23,6 +23,10 @@ export declare class VapiWebhookHandler {
     private handleUpdateStage;
     private handleCheckCalendarAvailability;
     private handleScheduleAppointment;
+    /** Resolve a contact consistently for payment verification and booking. */
+    private resolveContactId;
+    /** Returns a factual payment result the caller can use before scheduling. */
+    private handleCheckReservationPayment;
     private handleRescheduleAppointment;
     private handleLookupCaller;
     private handleSearchContact;

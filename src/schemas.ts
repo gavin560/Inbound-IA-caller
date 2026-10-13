@@ -315,6 +315,13 @@ export const SendTextLinkArgsSchema = z.object({
   phone: z.string().optional(),
 });
 
+// Contact details are optional because the service resolves them from the
+// active Vapi call whenever possible.
+export const CheckReservationPaymentArgsSchema = z.object({
+  contactId: z.string().optional(),
+  phone: z.string().optional(),
+});
+
 // Response schemas
 export const ToolResultSchema = z.object({
   id: z.string(),
@@ -350,6 +357,7 @@ export type DdpMarkTransferredArgs = z.infer<typeof DdpMarkTransferredArgsSchema
 export type DdpMarkTransferredSupportArgs = z.infer<typeof DdpMarkTransferredSupportArgsSchema>;
 export type SendTextGuideArgs = z.infer<typeof SendTextGuideArgsSchema>;
 export type SendTextLinkArgs = z.infer<typeof SendTextLinkArgsSchema>;
+export type CheckReservationPaymentArgs = z.infer<typeof CheckReservationPaymentArgsSchema>;
 export type ToolResult = z.infer<typeof ToolResultSchema>;
 export type WebhookResponse = z.infer<typeof WebhookResponseSchema>;
 

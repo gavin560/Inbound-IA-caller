@@ -1,0 +1,25 @@
+{
+  "type": "function",
+  "function": {
+    "name": "check_reservation_payment",
+    "description": "Checks whether the caller's required $25 Amplify Dallas reservation payment has been confirmed by GoHighLevel. Call this only after the caller says they have completed the payment. If paid is false, do not check calendar availability or schedule an appointment. If paid is true, the caller may proceed with normal availability and scheduling tools.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "contactId": {
+          "type": "string",
+          "description": "Optional GoHighLevel contact ID when available."
+        },
+        "phone": {
+          "type": "string",
+          "description": "Optional caller phone number when contactId is unavailable."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "server": {
+    "url": "https://inbound-ia-caller.vercel.app/vapi/webhook?token=REPLACE_WITH_WEBHOOK_TOKEN",
+    "timeoutSeconds": 20
+  }
+}

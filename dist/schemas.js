@@ -282,6 +282,12 @@ export const SendTextLinkArgsSchema = z.object({
     contactId: z.string().optional(),
     phone: z.string().optional(),
 });
+// Contact details are optional because the service resolves them from the
+// active Vapi call whenever possible.
+export const CheckReservationPaymentArgsSchema = z.object({
+    contactId: z.string().optional(),
+    phone: z.string().optional(),
+});
 // Response schemas
 export const ToolResultSchema = z.object({
     id: z.string(),

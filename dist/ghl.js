@@ -114,6 +114,32 @@ export class GHLConnector {
         }
     }
     /**
+     * Checks whether a contact carries the payment-confirmation tag supplied by
+     * the location's payment workflow. Tags are used rather than an LLM claim
+     * or a sent-SMS receipt, so appointment creation is blocked until GHL has
+     * actually recorded the payment event.
+     */
+    async hasContactTag(contactId, expectedTag) {
+        const ghlApiKey = this.getGHLApiKey();
+        if (!ghlApiKey) {
+            throw new Error('GHL_API_KEY not configured for this client');
+        }
+        const response = await this.httpClient.get(`https://services.leadconnectorhq.com/contacts/${contactId}`, {
+            headers: {
+                'Authorization': `Bearer ${ghlApiKey}`,
+                'Content-Type': 'application/json',
+                'Version': '2021-07-28',
+            },
+        });
+        if (!response.ok) {
+            throw new Error(`Unable to read payment status from GoHighLevel (${response.status})`);
+        }
+        const contact = response.data?.contact || response.data || {};
+        const tags = Array.isArray(contact.tags) ? contact.tags : [];
+        const normalizedExpected = expectedTag.trim().toLowerCase();
+        return tags.some((tag) => typeof tag === 'string' && tag.trim().toLowerCase() === normalizedExpected);
+    }
+    /**
      * Get the Calendar ID based on Assistant ID and optional calendar type.
      * - 'main' (default): primary client calendar
      * - 'gabriel': DDP secondary calendar (collections under $40K)

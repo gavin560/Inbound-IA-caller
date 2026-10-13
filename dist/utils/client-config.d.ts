@@ -16,6 +16,7 @@ export interface ClientConfig {
     smsLinkUrls?: Record<string, string>;
     smsLinkMessages?: Record<string, string>;
     requiredSmsLinkKeys?: string[];
+    reservationPaymentTag?: string;
 }
 /**
  * Client Configuration Manager
@@ -52,6 +53,11 @@ export declare class ClientConfigManager {
      * key must be rejected by the tool handler rather than resolved as DEFAULT.
      */
     static getRequiredSmsLinkKeys(assistantId: string): string[] | undefined;
+    /**
+     * Return the payment-confirmation tag required before this assistant may
+     * create a clinic appointment.
+     */
+    static getReservationPaymentTag(assistantId: string): string | undefined;
     /**
      * Get Calendar ID by Assistant ID
      */

@@ -25,6 +25,10 @@ export interface ClientConfig {
   // When set, the caller must name one of these variants. This prevents a
   // multi-program practice from silently falling back to its DEFAULT link.
   requiredSmsLinkKeys?: string[];
+  // A GoHighLevel tag applied by a successful reservation payment workflow.
+  // The caller service uses this as a server-side gate before creating a
+  // clinic appointment.
+  reservationPaymentTag?: string;
 }
 
 /**
@@ -157,6 +161,7 @@ export class ClientConfigManager {
         calendarIdCallbackVar: 'AMPLIFY_LIFE_DALLAS_CALLBACK_CALENDAR_ID',
         locationIdVar: 'AMPLIFY_LIFE_DALLAS_LOCATION_ID',
         slackChannelVar: 'SLACK_CHANNEL_ID_AMPLIFY_LIFE_DALLAS',
+        reservationPaymentTagVar: 'AMPLIFY_LIFE_DALLAS_RESERVATION_PAYMENT_TAG',
       },
       {
         name: 'Chiromedix',
@@ -305,6 +310,14 @@ export class ClientConfigManager {
       // let either caller fall through to a shared DEFAULT payment link.
       if (clientDef.name === 'Miami Valley') {
         config.requiredSmsLinkKeys = ['NEUROPATHY', 'BACK_NECK'];
+      }
+
+      // Amplify Dallas' payment gate is deliberately fail-closed. The default
+      // tag is the one its GHL payment workflow creates; the environment value
+      // permits a future rename without a code deployment.
+      if ('reservationPaymentTagVar' in clientDef && clientDef.reservationPaymentTagVar) {
+        config.reservationPaymentTag =
+          process.env[clientDef.reservationPaymentTagVar] || 'amplify-dallas-reservation-paid';
       }
 
       // Add optional Slack channel if configured
@@ -550,6 +563,14 @@ export class ClientConfigManager {
    */
   static getRequiredSmsLinkKeys(assistantId: string): string[] | undefined {
     return this.getConfigByAssistantId(assistantId)?.requiredSmsLinkKeys;
+  }
+
+  /**
+   * Return the payment-confirmation tag required before this assistant may
+   * create a clinic appointment.
+   */
+  static getReservationPaymentTag(assistantId: string): string | undefined {
+    return this.getConfigByAssistantId(assistantId)?.reservationPaymentTag;
   }
 
   /**

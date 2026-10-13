@@ -26,6 +26,7 @@ import {
   DdpMarkTransferredSupportArgsSchema,
   SendTextGuideArgsSchema,
   SendTextLinkArgsSchema,
+  CheckReservationPaymentArgsSchema,
   CheckContactArgsSchema,
   CreateContactArgsSchema,
   ToolResult,
@@ -362,7 +363,7 @@ export class VapiWebhookHandler {
         case 'schedule_appointment':
         case 'schedule_appointment_inbound':
         case 'schedule_ddp_inbound':
-          return await this.handleScheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'main', customerPhone);
+          return await this.handleScheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'main', customerPhone, assistantId);
 
         case 'schedule_gabriel':
         case 'schedule_gabriel_inbound':
@@ -414,6 +415,9 @@ export class VapiWebhookHandler {
         case 'send_text_link':
         case 'send_text_link_inbound':
           return await this.handleSendTextLink(id, args, ghlConnector, callId, assistantId, customerPhone);
+
+        case 'check_reservation_payment':
+          return await this.handleCheckReservationPayment(id, args, ghlConnector, callId, assistantId, customerPhone);
 
         case 'check_agent_availability':
         case 'check_agent_availability_inbound':
@@ -554,12 +558,38 @@ export class VapiWebhookHandler {
     }
   }
 
-  private async handleScheduleAppointment(id: string, args: any, ghlConnector: GHLConnector, ghlMetadata?: any, callId?: string, calendarType: 'main' | 'gabriel' | 'callback' | 'backneck' = 'main', customerPhone?: string | null): Promise<ToolResult> {
+  private async handleScheduleAppointment(id: string, args: any, ghlConnector: GHLConnector, ghlMetadata?: any, callId?: string, calendarType: 'main' | 'gabriel' | 'callback' | 'backneck' = 'main', customerPhone?: string | null, assistantId?: string): Promise<ToolResult> {
     try {
       const validatedArgs = ScheduleAppointmentArgsSchema.parse(args);
       // Mirror the program_tag routing applied in handleCheckCalendarAvailability
       // so the mismatch guard and the booking target the same calendar.
       const effectiveType = calendarType === 'main' && validatedArgs.program_tag === 'BACK_NECK' ? 'backneck' : calendarType;
+
+      // This is the hard payment gate. A prompt can be ignored or contradicted;
+      // this server check cannot. It applies only to assistants configured with
+      // a payment-confirmation tag, and only to real clinic appointments (not
+      // internal callback slots or reschedules).
+      const paymentTag = assistantId ? ClientConfigManager.getReservationPaymentTag(assistantId) : undefined;
+      if (paymentTag && calendarType === 'main') {
+        const contactId = await this.resolveContactId(validatedArgs.contactId, validatedArgs.phone, ghlConnector, callId, customerPhone);
+        if (!contactId) {
+          return {
+            id,
+            ok: false,
+            error: 'PAYMENT_NOT_CONFIRMED: The reservation payment cannot be verified because the caller contact is unavailable. Do not schedule the appointment.',
+          };
+        }
+
+        const paid = await ghlConnector.hasContactTag(contactId, paymentTag);
+        if (!paid) {
+          Logger.warn('[PAYMENT_GATE] Blocked unpaid appointment', { callId, contactId, assistantId });
+          return {
+            id,
+            ok: false,
+            error: 'PAYMENT_NOT_CONFIRMED: Do not schedule or hold an appointment. Ask the caller to complete the $25 reservation payment, then call check_reservation_payment before retrying.',
+          };
+        }
+      }
 
       if (callId) {
         const metadata = await this.stateStorage.getCallMetadata(callId);
@@ -590,6 +620,71 @@ export class VapiWebhookHandler {
         };
       }
       throw error;
+    }
+  }
+
+  /** Resolve a contact consistently for payment verification and booking. */
+  private async resolveContactId(
+    explicitContactId: string | undefined,
+    phone: string | undefined,
+    ghlConnector: GHLConnector,
+    callId?: string,
+    customerPhone?: string | null,
+  ): Promise<string | undefined> {
+    if (explicitContactId) return explicitContactId;
+    if (callId) {
+      const metadata = await this.stateStorage.getCallMetadata(callId);
+      if (metadata?.contactId) return metadata.contactId;
+    }
+    const lookupPhone = customerPhone || phone;
+    if (!lookupPhone) return undefined;
+    return (await ghlConnector.lookupContactByPhone(lookupPhone))?.contactId;
+  }
+
+  /** Returns a factual payment result the caller can use before scheduling. */
+  private async handleCheckReservationPayment(
+    id: string,
+    args: any,
+    ghlConnector: GHLConnector,
+    callId?: string,
+    assistantId?: string,
+    customerPhone?: string | null,
+  ): Promise<ToolResult> {
+    try {
+      const validatedArgs = CheckReservationPaymentArgsSchema.parse(args);
+      const paymentTag = assistantId ? ClientConfigManager.getReservationPaymentTag(assistantId) : undefined;
+      if (!paymentTag) {
+        return { id, ok: false, error: 'Payment verification is not configured for this assistant.' };
+      }
+
+      const contactId = await this.resolveContactId(
+        validatedArgs.contactId,
+        validatedArgs.phone,
+        ghlConnector,
+        callId,
+        customerPhone,
+      );
+      if (!contactId) {
+        return { id, ok: false, error: 'Could not resolve the caller contact for payment verification.' };
+      }
+
+      const paid = await ghlConnector.hasContactTag(contactId, paymentTag);
+      Logger.info('[PAYMENT_GATE] Reservation payment checked', { callId, contactId, assistantId, paid });
+      return {
+        id,
+        ok: true,
+        data: {
+          paid,
+          contactId,
+          message: paid
+            ? 'Reservation payment is confirmed. You may now check availability and schedule the clinic appointment.'
+            : 'Reservation payment is not confirmed. Do not check availability or schedule an appointment.',
+        },
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      Logger.error('[PAYMENT_GATE] Payment verification failed', { callId, assistantId, error: message });
+      return { id, ok: false, error: `Payment verification failed: ${message}` };
     }
   }
 
