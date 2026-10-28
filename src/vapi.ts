@@ -395,9 +395,11 @@ export class VapiWebhookHandler {
         case 'check_ddp_availability_inbound':
           return await this.handleCheckCalendarAvailability(id, args, ghlConnector, callId);
 
+        case 'check_gabriel_availability':
         case 'check_gabriel_availability_inbound':
           return await this.handleCheckCalendarAvailability(id, args, ghlConnector, callId, 'gabriel');
 
+        case 'check_callback_availability':
         case 'check_callback_availability_inbound':
           return await this.handleCheckCalendarAvailability(id, args, ghlConnector, callId, 'callback');
 
@@ -414,6 +416,7 @@ export class VapiWebhookHandler {
         case 'schedule_gabriel_inbound':
           return await this.handleScheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'gabriel', customerPhone);
 
+        case 'schedule_callback':
         case 'schedule_callback_inbound':
           return await this.handleScheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'callback', customerPhone);
 
@@ -426,9 +429,11 @@ export class VapiWebhookHandler {
         case 'reschedule_ddp_inbound':
           return await this.handleRescheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'main', customerPhone);
 
+        case 'reschedule_gabriel':
         case 'reschedule_gabriel_inbound':
           return await this.handleRescheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'gabriel', customerPhone);
 
+        case 'reschedule_callback':
         case 'reschedule_callback_inbound':
           return await this.handleRescheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'callback', customerPhone);
 
