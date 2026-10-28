@@ -428,6 +428,10 @@ export class VapiWebhookHandler {
         case 'send_text_link_inbound':
           return await this.handleSendTextLink(id, args, ghlConnector, callId, assistantId, customerPhone);
 
+        case 'check_masterclass_status':
+        case 'check_masterclass_status_inbound':
+          return await this.handleCheckWorkshopStatus(id, args, ghlConnector, callId, assistantId, customerPhone);
+
         case 'check_reservation_payment':
           return await this.handleCheckReservationPayment(id, args, ghlConnector, callId, assistantId, customerPhone);
 
@@ -652,6 +656,72 @@ export class VapiWebhookHandler {
     const lookupPhone = customerPhone || phone;
     if (!lookupPhone) return undefined;
     return (await ghlConnector.lookupContactByPhone(lookupPhone))?.contactId;
+  }
+
+  /**
+   * DDP Monthly Workshop registration check (Path V).
+   * Registered for an UPCOMING session = has a registration tag and none of the
+   * tags added once a session has happened (attended / no show) or once they
+   * already upgraded (vip). Those post-session tags are what tell a current
+   * registrant apart from someone who registered for an earlier session.
+   */
+  private async handleCheckWorkshopStatus(
+    id: string,
+    args: any,
+    ghlConnector: GHLConnector,
+    callId?: string,
+    assistantId?: string,
+    customerPhone?: string | null,
+  ): Promise<ToolResult> {
+    const notRegistered = (resolved: boolean, reason: string) => ({
+      id,
+      ok: true,
+      data: { resolved, registered: false, message: reason },
+    });
+    try {
+      const clientName = assistantId ? ClientConfigManager.getClientName(assistantId) : '';
+      if (clientName !== 'DDP') {
+        return notRegistered(false, 'Workshop check is only configured for DDP. Treat as not registered.');
+      }
+      const rawPhone = typeof args?.phone === 'string' && !args.phone.includes('{{') ? args.phone : undefined;
+      const rawContactId = typeof args?.contactId === 'string' && !args.contactId.includes('{{') ? args.contactId : undefined;
+      const contactId = await this.resolveContactId(rawContactId, rawPhone, ghlConnector, callId, customerPhone);
+      if (!contactId) {
+        return notRegistered(false, 'Caller not found in the CRM. Treat as not registered and continue normal routing.');
+      }
+      const tags = await ghlConnector.getContactTags(contactId);
+      const REGISTERED = ['ai workshop - registered', 'ai workshop v2 - registered'];
+      const DONE_OR_VIP = [
+        'ai workshop - vip',
+        'ai workshop - day 1 attended',
+        'ai workshop - day 2 attended',
+        'ai workshop - no show',
+        'ai workshop - workshop attended',
+        'ai workshop - workshop no show',
+        'ai workshop v2 - workshop attended',
+        'ai workshop v2 - workshop no show',
+      ];
+      const hasRegistration = tags.some((t) => REGISTERED.includes(t));
+      const doneOrVip = tags.filter((t) => DONE_OR_VIP.includes(t));
+      const registered = hasRegistration && doneOrVip.length === 0;
+      Logger.info('[WORKSHOP_CHECK] Checked workshop status', { callId, contactId, hasRegistration, doneOrVip, registered });
+      return {
+        id,
+        ok: true,
+        data: {
+          resolved: true,
+          registered,
+          contactId,
+          message: registered
+            ? 'Caller is registered for the upcoming Monthly Workshop and has not upgraded to VIP. Run Path V.'
+            : 'Caller is not registered for an upcoming Workshop (or already attended / already VIP). Do not run Path V.',
+        },
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      Logger.error('[WORKSHOP_CHECK] Failed', { callId, assistantId, error: message });
+      return notRegistered(false, 'Workshop check failed. Treat as not registered and continue normal routing.');
+    }
   }
 
   /** Returns a factual payment result the caller can use before scheduling. */

@@ -145,6 +145,32 @@ export class GHLConnector {
    * or a sent-SMS receipt, so appointment creation is blocked until GHL has
    * actually recorded the payment event.
    */
+  /** All of a contact's tags, lowercased and trimmed. */
+  async getContactTags(contactId: string): Promise<string[]> {
+    const ghlApiKey = this.getGHLApiKey();
+    if (!ghlApiKey) {
+      throw new Error('GHL_API_KEY not configured for this client');
+    }
+    const response = await this.httpClient.get(
+      `https://services.leadconnectorhq.com/contacts/${contactId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${ghlApiKey}`,
+          'Content-Type': 'application/json',
+          'Version': '2021-07-28',
+        },
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Unable to read contact from GoHighLevel (${response.status})`);
+    }
+    const contact = response.data?.contact || response.data || {};
+    const tags = Array.isArray(contact.tags) ? contact.tags : [];
+    return tags
+      .filter((t: unknown): t is string => typeof t === 'string')
+      .map((t: string) => t.trim().toLowerCase());
+  }
+
   async hasContactTag(contactId: string, expectedTag: string): Promise<boolean> {
     const ghlApiKey = this.getGHLApiKey();
     if (!ghlApiKey) {
