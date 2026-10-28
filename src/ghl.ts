@@ -84,9 +84,15 @@ export class GHLConnector {
       return null;
     }
 
+    const locationId = this.assistantId ? ClientConfigManager.getLocationId(this.assistantId) : undefined;
     const trySearch = async (phoneParam: string) => {
+      // Current GHL API: list contacts in the location filtered by the number.
+      // The legacy /contacts/search?phone= endpoint returns 400 and is only a
+      // fallback for clients with no location configured.
       const response = await this.httpClient.get(
-        `https://services.leadconnectorhq.com/contacts/search?phone=${encodeURIComponent(phoneParam)}`,
+        locationId
+          ? `https://services.leadconnectorhq.com/contacts/?locationId=${encodeURIComponent(locationId)}&query=${encodeURIComponent(phoneParam)}`
+          : `https://services.leadconnectorhq.com/contacts/search?phone=${encodeURIComponent(phoneParam)}`,
         {
           headers: {
             'Authorization': `Bearer ${ghlApiKey}`,
@@ -103,6 +109,9 @@ export class GHLConnector {
 
     try {
       let contacts = await trySearch(phone);
+      if (contacts.length === 0 && phone.startsWith('+1')) {
+        contacts = await trySearch(phone.substring(2));
+      }
       if (contacts.length === 0 && phone.startsWith('+')) {
         contacts = await trySearch(phone.substring(1));
       }
@@ -1280,9 +1289,40 @@ export class GHLConnector {
             phone: normalizedPhone ? '***' + normalizedPhone.slice(-4) : 'missing',
           });
           
-          // Try different search endpoints/formats
-          // Option 1: Search by phone with + prefix
-          let searchResponse = await this.httpClient.get(
+          // Option 0 (works on the current GHL API): list contacts in this
+          // location filtered by the phone number. The two legacy
+          // /contacts/search?phone= calls below return 400 and are kept only as
+          // a fallback.
+          let searchResponse: any = { ok: false };
+          if (locationId) {
+            searchResponse = await this.httpClient.get(
+              `https://services.leadconnectorhq.com/contacts/?locationId=${encodeURIComponent(locationId)}&query=${encodeURIComponent(normalizedPhone)}`,
+              {
+                headers: {
+                  'Authorization': `Bearer ${ghlApiKey}`,
+                  'Content-Type': 'application/json',
+                  'Version': '2021-07-28',
+                },
+              }
+            );
+            const found = searchResponse.ok ? (searchResponse.data?.contacts || []) : [];
+            if (searchResponse.ok && found.length === 0 && normalizedPhone.startsWith('+1')) {
+              // Contacts saved without country code still match on the 10 digits.
+              searchResponse = await this.httpClient.get(
+                `https://services.leadconnectorhq.com/contacts/?locationId=${encodeURIComponent(locationId)}&query=${encodeURIComponent(normalizedPhone.slice(2))}`,
+                {
+                  headers: {
+                    'Authorization': `Bearer ${ghlApiKey}`,
+                    'Content-Type': 'application/json',
+                    'Version': '2021-07-28',
+                  },
+                }
+              );
+            }
+          }
+
+          // Option 1 (legacy): Search by phone with + prefix
+          if (!searchResponse.ok) searchResponse = await this.httpClient.get(
             `https://services.leadconnectorhq.com/contacts/search?phone=${encodeURIComponent(normalizedPhone)}`,
             {
               headers: {
