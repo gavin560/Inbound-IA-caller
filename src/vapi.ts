@@ -362,7 +362,14 @@ export class VapiWebhookHandler {
   }
 
   private async dispatchToolCall(toolCall: VapiToolCall, ghlConnector: GHLConnector, ghlMetadata?: any, callId?: string, assistantId?: string, customerPhone?: string | null): Promise<ToolResult> {
-    const { id, name, arguments: args } = toolCall;
+    const { id, name } = toolCall;
+    // Drop template placeholders the platform never filled in (e.g. a dashboard
+    // test call passes "{{contactId}}" / "{{number}}" literally). Treated as
+    // missing, so the handlers fall back to the caller's real number / contact.
+    const rawArgs: any = toolCall.arguments;
+    const args: any = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs)
+      ? Object.fromEntries(Object.entries(rawArgs).filter(([, v]) => !(typeof v === 'string' && /\{\{.*\}\}/.test(v))))
+      : rawArgs;
 
     Logger.info('Dispatching tool call', { id, name, callId, args, hasGhlMetadata: !!ghlMetadata });
 
