@@ -348,6 +348,30 @@ export class ClientConfigManager {
       });
     }
 
+    // DDP aliases: other DDP assistants (e.g. the outbound caller, whose main
+    // tools run on a separate server) can call DDP-only tools here, such as the
+    // Golden Ticket calendar. DDP_ALIAS_ASSISTANT_IDS is a comma-separated list.
+    const ddpAssistantId = process.env['DDP_ASSISTANT_ID'];
+    const ddpConfig = ddpAssistantId ? this.configs.get(ddpAssistantId) : undefined;
+    const ddpAliasIds = (process.env['DDP_ALIAS_ASSISTANT_IDS'] || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s && s !== ddpAssistantId);
+    if (ddpConfig) {
+      for (const aliasId of ddpAliasIds) {
+        if (this.configs.has(aliasId)) {
+          Logger.warn('[CLIENT_CONFIG] DDP alias skipped: assistant ID already configured', {
+            aliasAssistantId: aliasId.substring(0, 8) + '...',
+          });
+          continue;
+        }
+        this.configs.set(aliasId, { ...ddpConfig, assistantId: aliasId });
+        configuredClients.push('DDP (alias)');
+      }
+    } else if (ddpAliasIds.length > 0) {
+      Logger.warn('[CLIENT_CONFIG] Cannot create DDP aliases: DDP config not found');
+    }
+
     // Register alias assistant IDs that share the same configuration
     // Premier Wellness Back Neck uses the same config as Premier Wellness
     const premierWellnessAssistantId = process.env['PREMIER_WELLNESS_ASSISTANT_ID'];
