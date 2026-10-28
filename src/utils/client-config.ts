@@ -15,6 +15,7 @@ export interface ClientConfig {
   backNeckCalendarId?: string;
   callbackCalendarId?: string;
   gabrielCalendarId?: string;
+  goldenTicketCalendarId?: string;
   guideWorkflowId?: string;
   backNeckGuideWorkflowId?: string;
   locationId?: string;
@@ -194,6 +195,7 @@ export class ClientConfigManager {
         calendarIdVar: 'DDP_CALENDAR_ID',
         calendarIdCallbackVar: 'DDP_CALLBACK_CALENDAR_ID',
         calendarIdGabrielVar: 'DDP_GABRIEL_CALENDAR_ID',
+        calendarIdGoldenTicketVar: 'DDP_GOLDEN_TICKET_CALENDAR_ID',
         locationIdVar: 'DDP_LOCATION_ID',
         slackChannelVar: 'SLACK_CHANNEL_ID_DDP',
       },
@@ -252,6 +254,14 @@ export class ClientConfigManager {
         const gabrielCalendarId = process.env[clientDef.calendarIdGabrielVar];
         if (gabrielCalendarId) {
           config.gabrielCalendarId = gabrielCalendarId;
+        }
+      }
+
+      // Add optional Golden Ticket calendar ID if configured (DDP — Driven Doc AI Golden Ticket calls)
+      if ('calendarIdGoldenTicketVar' in clientDef && clientDef.calendarIdGoldenTicketVar) {
+        const goldenTicketCalendarId = process.env[clientDef.calendarIdGoldenTicketVar];
+        if (goldenTicketCalendarId) {
+          config.goldenTicketCalendarId = goldenTicketCalendarId;
         }
       }
 
@@ -595,6 +605,14 @@ export class ClientConfigManager {
   static getCallbackCalendarId(assistantId: string): string | undefined {
     const config = this.getConfigByAssistantId(assistantId);
     return config?.callbackCalendarId;
+  }
+
+  /**
+   * Get Golden Ticket Calendar ID by Assistant ID (DDP — Driven Doc AI Golden Ticket calls)
+   */
+  static getGoldenTicketCalendarId(assistantId: string): string | undefined {
+    const config = this.getConfigByAssistantId(assistantId);
+    return config?.goldenTicketCalendarId;
   }
 
   /**

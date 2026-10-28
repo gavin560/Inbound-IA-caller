@@ -360,6 +360,10 @@ export class VapiWebhookHandler {
         case 'check_callback_availability_inbound':
           return await this.handleCheckCalendarAvailability(id, args, ghlConnector, callId, 'callback');
 
+        case 'check_golden_ticket_availability':
+        case 'check_golden_ticket_availability_inbound':
+          return await this.handleCheckCalendarAvailability(id, args, ghlConnector, callId, 'goldenticket');
+
         case 'schedule_appointment':
         case 'schedule_appointment_inbound':
         case 'schedule_ddp_inbound':
@@ -372,6 +376,10 @@ export class VapiWebhookHandler {
         case 'schedule_callback_inbound':
           return await this.handleScheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'callback', customerPhone);
 
+        case 'schedule_golden_ticket':
+        case 'schedule_golden_ticket_inbound':
+          return await this.handleScheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'goldenticket', customerPhone);
+
         case 'reschedule_appointment':
         case 'reschedule_appointment_inbound':
         case 'reschedule_ddp_inbound':
@@ -382,6 +390,10 @@ export class VapiWebhookHandler {
 
         case 'reschedule_callback_inbound':
           return await this.handleRescheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'callback', customerPhone);
+
+        case 'reschedule_golden_ticket':
+        case 'reschedule_golden_ticket_inbound':
+          return await this.handleRescheduleAppointment(id, args, ghlConnector, ghlMetadata, callId, 'goldenticket', customerPhone);
 
         case 'lookup_caller':
           return await this.handleLookupCaller(id, args, callId, customerPhone);
@@ -527,7 +539,7 @@ export class VapiWebhookHandler {
     }
   }
 
-  private async handleCheckCalendarAvailability(id: string, args: any, ghlConnector: GHLConnector, callId?: string, calendarType: 'main' | 'gabriel' | 'callback' | 'backneck' = 'main'): Promise<ToolResult> {
+  private async handleCheckCalendarAvailability(id: string, args: any, ghlConnector: GHLConnector, callId?: string, calendarType: 'main' | 'gabriel' | 'callback' | 'backneck' | 'goldenticket' = 'main'): Promise<ToolResult> {
     try {
       const validatedArgs = CheckCalendarAvailabilityArgsSchema.parse(args);
       // For multi-program frontdesk assistants, program_tag routes the default
@@ -558,7 +570,7 @@ export class VapiWebhookHandler {
     }
   }
 
-  private async handleScheduleAppointment(id: string, args: any, ghlConnector: GHLConnector, ghlMetadata?: any, callId?: string, calendarType: 'main' | 'gabriel' | 'callback' | 'backneck' = 'main', customerPhone?: string | null, assistantId?: string): Promise<ToolResult> {
+  private async handleScheduleAppointment(id: string, args: any, ghlConnector: GHLConnector, ghlMetadata?: any, callId?: string, calendarType: 'main' | 'gabriel' | 'callback' | 'backneck' | 'goldenticket' = 'main', customerPhone?: string | null, assistantId?: string): Promise<ToolResult> {
     try {
       const validatedArgs = ScheduleAppointmentArgsSchema.parse(args);
       // Mirror the program_tag routing applied in handleCheckCalendarAvailability
@@ -598,6 +610,7 @@ export class VapiWebhookHandler {
           const expectedCheckTool =
             effectiveType === 'gabriel' ? 'check_gabriel_availability_inbound' :
             effectiveType === 'callback' ? 'check_callback_availability_inbound' :
+            effectiveType === 'goldenticket' ? 'check_golden_ticket_availability_inbound' :
             effectiveType === 'backneck' ? 'check_calendar_availability (program_tag: BACK_NECK)' :
             'check_ddp_availability_inbound';
           Logger.warn('[SCHEDULE] Calendar mismatch — refusing booking', { callId, lastChecked, attempted: effectiveType });
@@ -688,7 +701,7 @@ export class VapiWebhookHandler {
     }
   }
 
-  private async handleRescheduleAppointment(id: string, args: any, ghlConnector: GHLConnector, ghlMetadata?: any, callId?: string, calendarType: 'main' | 'gabriel' | 'callback' | 'backneck' = 'main', customerPhone?: string | null): Promise<ToolResult> {
+  private async handleRescheduleAppointment(id: string, args: any, ghlConnector: GHLConnector, ghlMetadata?: any, callId?: string, calendarType: 'main' | 'gabriel' | 'callback' | 'backneck' | 'goldenticket' = 'main', customerPhone?: string | null): Promise<ToolResult> {
     try {
       const validatedArgs = RescheduleAppointmentArgsSchema.parse(args);
       // Mirror the program_tag routing used by the scheduling flows so we look

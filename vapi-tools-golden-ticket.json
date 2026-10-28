@@ -1,0 +1,65 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "check_golden_ticket_availability_inbound",
+      "description": "Checks open slots on DDP's Golden Ticket calendar (\"Driven Doc AI 2026 — Golden Ticket Accelerator Call\" with Gabe). Use ONLY for doctors who are not DDP members and want a Golden Ticket call about the Driven Doc AI event. For a regular Driven OS / coaching sales call, use check_gabriel_availability_inbound instead. Always call this before schedule_golden_ticket_inbound.",
+      "parameters": {
+        "type": "object",
+        "required": ["dateTime"],
+        "properties": {
+          "dateTime": {
+            "type": "string",
+            "description": "The day (or day and time) the caller wants, in ISO 8601 with the caller's timezone offset, e.g. '2026-10-29T10:00:00-06:00'. Never use UTC (Z)."
+          },
+          "durationMinutes": {
+            "type": "number",
+            "description": "Length of the call in minutes. Defaults to 30."
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "schedule_golden_ticket_inbound",
+      "description": "Books a Golden Ticket call with Gabe on DDP's Golden Ticket calendar. Call only after check_golden_ticket_availability_inbound confirmed the slot and the caller agreed to it. Ask for the caller's email before calling this tool; it is required.",
+      "parameters": {
+        "type": "object",
+        "required": ["name", "email", "startTime", "endTime"],
+        "properties": {
+          "name": { "type": "string", "description": "Doctor's full name." },
+          "email": { "type": "string", "description": "Doctor's email, collected on the call. Required." },
+          "phone": { "type": "string", "description": "Caller's phone number, if known." },
+          "contactId": { "type": "string", "description": "GHL contact ID from ddp_check_contact or ddp_create_contact, if known." },
+          "startTime": {
+            "type": "string",
+            "description": "The EXACT start time the caller chose, ISO 8601 with their timezone offset, e.g. '2026-10-29T10:00:00-06:00'. Never convert to UTC (Z)."
+          },
+          "endTime": { "type": "string", "description": "startTime plus the call length, same timezone offset." },
+          "notes": { "type": "string", "description": "Short notes for Gabe: practice name, monthly collections, main goal (save time with AI / lead the team / grow revenue)." }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "reschedule_golden_ticket_inbound",
+      "description": "Moves an existing Golden Ticket call to a new time. Check the new slot with check_golden_ticket_availability_inbound first.",
+      "parameters": {
+        "type": "object",
+        "required": ["newStartTime", "newEndTime"],
+        "properties": {
+          "contactId": { "type": "string", "description": "GHL contact ID, if known." },
+          "phone": { "type": "string", "description": "Caller's phone number, if contactId is unknown." },
+          "appointmentId": { "type": "string", "description": "GHL appointment ID, if known." },
+          "newStartTime": { "type": "string", "description": "New start time, ISO 8601 with the caller's timezone offset. Never UTC (Z)." },
+          "newEndTime": { "type": "string", "description": "New end time, same timezone offset." },
+          "notes": { "type": "string", "description": "Reason for the change (optional)." }
+        }
+      }
+    }
+  }
+]
