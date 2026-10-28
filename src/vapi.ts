@@ -293,6 +293,21 @@ export class VapiWebhookHandler {
       hasGhlMetadata: !!ghlMetadata,
     });
 
+    // Vapi's dashboard chat tester sends tool calls with no call/assistant info.
+    // These tools exist only on DDP's assistants, so when nothing identifies the
+    // assistant we can safely run them as DDP. Every other tool is unaffected.
+    const DDP_ONLY_TOOLS = new Set([
+      'check_golden_ticket_availability', 'check_golden_ticket_availability_inbound',
+      'schedule_golden_ticket', 'schedule_golden_ticket_inbound',
+      'reschedule_golden_ticket', 'reschedule_golden_ticket_inbound',
+      'check_masterclass_status_inbound',
+    ]);
+    if (!assistantId && process.env.DDP_ASSISTANT_ID && toolCallList.length > 0
+        && toolCallList.every((t) => DDP_ONLY_TOOLS.has(t.name))) {
+      assistantId = process.env.DDP_ASSISTANT_ID;
+      Logger.info('[VAPI] No assistant on request; DDP-only tool, running as DDP', { callId });
+    }
+
     const ghlConnector = this.createGhlConnector(assistantId);
 
     const vapiResults: Array<{ toolCallId: string; result: string }> = [];
