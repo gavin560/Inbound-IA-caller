@@ -1103,7 +1103,7 @@ export class VapiWebhookHandler {
           ...(isMember ? {
             message: 'This caller is an existing DDP member. Skip discovery, qualification, persona match, and value hook. Greet them by name, ask what they need help with, then call ddp_mark_transferred_support followed by transfer_call_tool_ddp_support.',
           } : wasTransferred ? {
-            message: 'This caller was previously transferred to a live agent who did not answer. Do not run the full discovery script — offer to book a callback using check_callback_availability_inbound and schedule_callback_inbound.',
+            message: 'This caller was previously transferred to a live agent who did not answer. Do not run the full discovery script and do not transfer again — offer to book a call with our practice growth specialist using check_gabriel_availability_inbound and schedule_gabriel_inbound.',
           } : {}),
         },
       };
