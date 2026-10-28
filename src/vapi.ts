@@ -231,7 +231,26 @@ export class VapiWebhookHandler {
         // GHL sends metadata.ghl.contactId when it triggers Vapi
         const ghlMetadata = (message as any).call?.metadata?.ghl || null;
         const callId = (message as any).call?.id;
-        const customerPhone = (message as any).call?.customer?.number || null;
+        let customerPhone = (message as any).call?.customer?.number || null;
+        // Some tool-call webhooks arrive with only call.id and assistantId (no
+        // customer). Without the caller's number a booking can't find or create
+        // the contact, so look the call up in Vapi once. Best-effort, capped at
+        // 2.5s so a slow Vapi API never stalls the caller.
+        if (!customerPhone && callId) {
+          try {
+            const call = await Promise.race([
+              this.vapiApiClient.getCall(callId),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+            ]);
+            customerPhone = (call as any)?.customer?.number || null;
+            Logger.info('[VAPI] Caller phone fetched from Vapi call', { callId, found: !!customerPhone });
+          } catch (error) {
+            Logger.warn('[VAPI] Could not fetch caller phone from Vapi', {
+              callId,
+              error: error instanceof Error ? error.message : 'Unknown error',
+            });
+          }
+        }
         Logger.info('[VAPI] Extracted GHL metadata for tool-calls', {
           callId,
           hasGhlMetadata: !!ghlMetadata,
